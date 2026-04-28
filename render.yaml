@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: cabine-2-0
+    env: node
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: GENIUSPAY_API_KEY
+        value: "sk_test_geniuspay_YOUR_KEY_HERE"
+      - key: GENIUSPAY_API_URL
+        value: "https://api.genius.ci/v1"
