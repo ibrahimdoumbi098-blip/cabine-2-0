@@ -8,7 +8,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
@@ -193,7 +193,7 @@ app.post('/api/transfer', (req, res) => {
 // 4. Servir le Frontend React (Dossier 'dist' compilé)
 app.use(express.static(join(__dirname, 'dist')));
 
-app.get('*', (req, res) => {
+app.get('/*splat', (req, res) => {
   res.sendFile(join(__dirname, 'dist', 'index.html'));
 });
 
