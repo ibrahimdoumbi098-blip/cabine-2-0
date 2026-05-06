@@ -12,14 +12,21 @@ services:
     buildCommand: npm install && npm run build
     startCommand: npm start
     healthCheckPath: /api/health
+
+    # === Domaine de production ===
+    domains:
+      - cabine.ci
+      - www.cabine.ci
+
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
         value: "3000"
+      - key: APP_DOMAIN
+        value: "https://cabine.ci"
 
-      # === GeniusPay — Sandbox ===
-      # Remplacer par les clés Live lors du passage en production
+      # === GeniusPay — passer en Live dès que GeniusPay valide le compte ===
       - key: GENIUSPAY_MODE
         value: sandbox
       - key: GENIUSPAY_PK

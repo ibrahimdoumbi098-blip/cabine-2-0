@@ -1,19 +1,49 @@
 {
+  "id": "https://cabine.ci/",
   "name": "Cabine 2.0 — Le Super Agrégateur",
   "short_name": "Cabine 2.0",
-  "description": "Plateforme de transfert inter-réseaux mobile money en Côte d'Ivoire. Orange, MTN, Wave, Moov.",
-  "start_url": "/",
+  "description": "Plateforme professionnelle de transfert inter-réseaux mobile money en Côte d'Ivoire. Orange, MTN, Wave, Moov — rapide, sécurisé, fiable.",
+  "start_url": "https://cabine.ci/",
+  "scope": "https://cabine.ci/",
   "display": "standalone",
-  "orientation": "portrait",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "portrait-primary",
   "background_color": "#f5f6fa",
   "theme_color": "#6366f1",
-  "categories": ["finance", "utilities"],
+  "lang": "fr-CI",
+  "dir": "ltr",
+  "categories": ["finance", "utilities", "business"],
+  "iarc_rating_id": "",
+  "prefer_related_applications": false,
+  "shortcuts": [
+    {
+      "name": "Nouveau transfert",
+      "short_name": "Transfert",
+      "description": "Lancer un transfert inter-réseaux",
+      "url": "https://cabine.ci/?action=transfer",
+      "icons": [{ "src": "/favicon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Encaisser un retrait",
+      "short_name": "Retrait",
+      "description": "Encaisser un retrait client",
+      "url": "https://cabine.ci/?action=withdraw",
+      "icons": [{ "src": "/favicon.svg", "sizes": "any" }]
+    }
+  ],
   "icons": [
     {
       "src": "/favicon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
     }
-  ]
+  ],
+  "screenshots": []
 }

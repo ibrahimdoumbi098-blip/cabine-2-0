@@ -35,17 +35,58 @@ function log(level, message, data = {}) {
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const IS_PROD = process.env.NODE_ENV === 'production';
+const APP_DOMAIN = process.env.APP_DOMAIN || 'https://cabine.ci';
 
-app.use(cors());
+// ==========================================
+// CORS — production: cabine.ci only
+// ==========================================
+const ALLOWED_ORIGINS = IS_PROD
+  ? [APP_DOMAIN, 'https://www.cabine.ci', 'https://cabine.ci']
+  : ['http://localhost:5173', 'http://localhost:3000', APP_DOMAIN];
+
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    log('WARN', 'CORS blocked', { origin });
+    cb(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+
 app.use(express.json({ limit: '10mb' }));
 
-// Security headers
+// ==========================================
+// www → apex redirect (301 permanent)
+// ==========================================
+app.use((req, res, next) => {
+  if (req.hostname === 'www.cabine.ci') {
+    return res.redirect(301, `https://cabine.ci${req.url}`);
+  }
+  next();
+});
+
+// ==========================================
+// SECURITY HEADERS — production grade
+// ==========================================
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-XSS-Protection', '1; mode=block');
-  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:;");
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+  res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
+  res.setHeader('Content-Security-Policy', [
+    "default-src 'self' https://cabine.ci",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com",
+    "img-src 'self' data: https:",
+    "connect-src 'self' https://cabine.ci https://pay.genius.ci",
+    "frame-ancestors 'none'",
+  ].join('; '));
   next();
 });
 
