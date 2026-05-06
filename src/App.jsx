@@ -272,6 +272,7 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
     localStorage.getItem('sidebar_collapsed') === 'true'
   );
+  const offlineCount = useRef(0);
 
   const toggleSidebar = () => {
     const next = !sidebarCollapsed;
@@ -378,6 +379,7 @@ function App() {
       const walletData = await walletRes.json();
       setBalance(walletData.balance);
       setAgentName(walletData.agent_name);
+      offlineCount.current = 0;
       setIsOffline(false);
 
       const queryParams = new URLSearchParams({ limit: '50' });
@@ -422,9 +424,10 @@ function App() {
       }
       setIsLoading(false);
     } catch (error) {
-      setIsOffline(true);
+      offlineCount.current += 1;
+      setIsOffline(offlineCount.current >= 8);
       setIsLoading(false);
-      console.error("Erreur de connexion au backend", error);
+      console.warn(`Tentative ${offlineCount.current} — backend inaccessible`);
     }
   };
 
@@ -655,8 +658,12 @@ function App() {
           <h1>Bonjour, {agentName.split(' ')[0]} 👋</h1>
           <p>Prêt à traiter les transactions d'aujourd'hui ?</p>
           <div className="gp-badge">
-            <span className={`gp-dot ${gpStatus.connected ? 'on' : 'off'}`}/>
-            {gpStatus.connected ? 'Connecté' : 'Hors ligne'}
+            <span className={`gp-dot ${gpStatus.connected ? 'on' : gpStatus.hasKeys ? 'warn' : 'off'}`}/>
+            {gpStatus.connected
+              ? (gpStatus.mode === 'live' ? 'GeniusPay Live' : 'GeniusPay Sandbox')
+              : gpStatus.hasKeys
+                ? 'Simulateur actif'
+                : 'API hors ligne'}
           </div>
         </div>
         <div className="master-balance">
@@ -1358,10 +1365,17 @@ function App() {
             </div>
           </aside>
 
-          {/* Offline Banner */}
+          {/* Connecting banner — soft yellow, shown 2-7 failures (4-14s) */}
+          {!isOffline && offlineCount.current >= 2 && (
+            <div className="connecting-banner">
+              <RefreshCw size={14} style={{animation:'spin 1s linear infinite'}}/> Connexion au serveur en cours...
+            </div>
+          )}
+
+          {/* Offline Banner — hard red, shown after 8 failures (16s+) */}
           {isOffline && (
             <div className="offline-banner">
-              <AlertTriangle size={16} /> Connexion au serveur perdue — vérifiez votre réseau
+              <AlertTriangle size={16} /> Serveur inaccessible — vérifiez votre réseau ou réessayez dans quelques secondes
             </div>
           )}
 
