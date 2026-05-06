@@ -31,29 +31,70 @@ const OPERATOR_CAPS = {
   internet: ['orange', 'mtn', 'moov'],
 };
 
-// === INTERNET BUNDLES PER OPERATOR ===
+// === INTERNET BUNDLES — Données officielles opérateurs CI (orange.ci / mtn.ci / moov-africa.ci) ===
 const INTERNET_BUNDLES = {
-  orange: [
-    { id: 'o-100m', label: '100 Mo', price: 200, validity: '24h', tag: null },
-    { id: 'o-500m', label: '500 Mo', price: 500, validity: '7 jours', tag: null },
-    { id: 'o-1g',   label: '1 Go',   price: 1000, validity: '30 jours', tag: 'Populaire' },
-    { id: 'o-5g',   label: '5 Go',   price: 4500, validity: '30 jours', tag: null },
-    { id: 'o-10g',  label: '10 Go',  price: 8000, validity: '30 jours', tag: 'Top valeur' },
-  ],
-  mtn: [
-    { id: 'm-100m', label: '100 Mo', price: 200, validity: '24h', tag: null },
-    { id: 'm-1g',   label: '1 Go',   price: 1000, validity: '30 jours', tag: 'Populaire' },
-    { id: 'm-3g',   label: '3 Go',   price: 2500, validity: '30 jours', tag: null },
-    { id: 'm-10g',  label: '10 Go',  price: 7500, validity: '30 jours', tag: 'Top valeur' },
-    { id: 'm-20g',  label: '20 Go',  price: 13000, validity: '30 jours', tag: null },
-  ],
-  wave: [], // Wave ne propose pas de forfaits data via agents
-  moov: [
-    { id: 'mo-200m', label: '200 Mo', price: 300, validity: '24h', tag: null },
-    { id: 'mo-1g',   label: '1 Go',   price: 900, validity: '30 jours', tag: 'Populaire' },
-    { id: 'mo-5g',   label: '5 Go',   price: 4000, validity: '30 jours', tag: null },
-    { id: 'mo-10g',  label: '10 Go',  price: 7000, validity: '30 jours', tag: 'Top valeur' },
-  ],
+  orange: {
+    daily: [
+      { id: 'o-d-40m',  label: '40 Mo',  price: 100, validity: '24h',    tag: null },
+      { id: 'o-d-100m', label: '100 Mo', price: 200, validity: '24h',    tag: null },
+      { id: 'o-d-250m', label: '250 Mo', price: 300, validity: '24h',    tag: null },
+      { id: 'o-d-500m', label: '500 Mo', price: 500, validity: '24h',    tag: null },
+      { id: 'o-d-1g',   label: '1 Go',   price: 700, validity: '24h',    tag: 'Populaire' },
+    ],
+    weekly: [
+      { id: 'o-w-500m', label: '500 Mo', price: 500,  validity: '7 jours', tag: null },
+      { id: 'o-w-1g5',  label: '1,5 Go', price: 1000, validity: '7 jours', tag: null },
+      { id: 'o-w-3g',   label: '3 Go',   price: 2000, validity: '7 jours', tag: 'Meilleur' },
+      { id: 'o-w-5g',   label: '5 Go',   price: 3000, validity: '7 jours', tag: null },
+    ],
+    monthly: [
+      { id: 'o-m-2g',   label: '2 Go',   price: 2000,  validity: '30 jours', tag: null },
+      { id: 'o-m-5g',   label: '5 Go',   price: 3500,  validity: '30 jours', tag: 'Populaire' },
+      { id: 'o-m-10g',  label: '10 Go',  price: 5000,  validity: '30 jours', tag: null },
+      { id: 'o-m-20g',  label: '20 Go',  price: 8000,  validity: '30 jours', tag: 'Top valeur' },
+      { id: 'o-m-40g',  label: '40 Go',  price: 15000, validity: '30 jours', tag: null },
+    ],
+  },
+  mtn: {
+    daily: [
+      { id: 'm-d-220m', label: '220 Mo', price: 200, validity: '2 jours', tag: null },
+      { id: 'm-d-400m', label: '400 Mo', price: 300, validity: '3 jours', tag: null },
+      { id: 'm-d-450m', label: '450 Mo', price: 400, validity: '3 jours', tag: null },
+      { id: 'm-d-750m', label: '750 Mo', price: 500, validity: '3 jours', tag: 'Populaire' },
+    ],
+    weekly: [
+      { id: 'm-w-1g5',  label: '1,5 Go', price: 1000, validity: '5 jours',  tag: null },
+      { id: 'm-w-2g2',  label: '2,2 Go', price: 1500, validity: '10 jours', tag: 'Meilleur' },
+    ],
+    monthly: [
+      { id: 'm-m-3g',   label: '3 Go',   price: 2000,  validity: '30 jours', tag: null },
+      { id: 'm-m-3g7',  label: '3,7 Go', price: 2500,  validity: '30 jours', tag: null },
+      { id: 'm-m-7g4',  label: '7,4 Go', price: 5000,  validity: '30 jours', tag: 'Populaire' },
+      { id: 'm-m-20g',  label: '20 Go',  price: 10000, validity: '30 jours', tag: 'Top valeur' },
+      { id: 'm-m-30g',  label: '30 Go',  price: 15000, validity: '30 jours', tag: null },
+      { id: 'm-m-45g',  label: '45 Go',  price: 20000, validity: '30 jours', tag: null },
+    ],
+  },
+  moov: {
+    daily: [
+      { id: 'mo-d-150m', label: '150 Mo', price: 150, validity: '2 jours', tag: null },
+      { id: 'mo-d-220m', label: '220 Mo', price: 200, validity: '2 jours', tag: null },
+      { id: 'mo-d-400m', label: '400 Mo', price: 300, validity: '2 jours', tag: null },
+      { id: 'mo-d-750m', label: '750 Mo', price: 500, validity: '3 jours', tag: 'Populaire' },
+    ],
+    weekly: [
+      { id: 'mo-w-1g',   label: '1 Go',   price: 750,  validity: '7 jours',  tag: null },
+      { id: 'mo-w-1g5',  label: '1,5 Go', price: 1000, validity: '5 jours',  tag: null },
+      { id: 'mo-w-2g5',  label: '2,5 Go', price: 1500, validity: '10 jours', tag: 'Meilleur' },
+    ],
+    monthly: [
+      { id: 'mo-m-3g',   label: '3 Go',   price: 2000,  validity: '30 jours', tag: null },
+      { id: 'mo-m-7g4',  label: '7,4 Go', price: 4900,  validity: '30 jours', tag: 'Populaire' },
+      { id: 'mo-m-20g',  label: '20 Go',  price: 9900,  validity: '30 jours', tag: 'Top valeur' },
+      { id: 'mo-m-30g',  label: '30 Go',  price: 14900, validity: '30 jours', tag: null },
+      { id: 'mo-m-45g',  label: '45 Go',  price: 19900, validity: '30 jours', tag: null },
+    ],
+  },
 };
 
 // === OPERATION CONFIG — single source of truth ===
@@ -763,6 +804,8 @@ function App() {
                 setAmount('');
                 setPhone('');
                 setSelectedBundle(null);
+                const caps = OPERATOR_CAPS[tab.id] ?? ['orange','mtn','wave','moov'];
+                if (!caps.includes(selectedProvider)) setSelectedProvider('orange');
               }}
             >
               <div className="tab-icon">{tab.icon}</div>
@@ -792,26 +835,18 @@ function App() {
               <div className="form-group">
                 <label>Réseau {activeOperation === 'internet' ? 'mobile' : 'de destination'}</label>
                 <div className="provider-grid">
-                  {['orange', 'mtn', 'wave', 'moov'].map(p => {
-                    const supported = OPERATOR_CAPS[activeOperation]?.includes(p) ?? true;
+                  {(['orange', 'mtn', 'wave', 'moov']).filter(p =>
+                    OPERATOR_CAPS[activeOperation]?.includes(p) ?? true
+                  ).map(p => {
                     const isSelected = selectedProvider === p;
                     return (
                       <div key={p}
-                        className={`provider-btn ${p} ${isSelected ? 'selected' : ''} ${!supported ? 'unavailable' : ''}`}
-                        onClick={() => {
-                          if (!supported) {
-                            addToast('warning', `${OPERATOR_NAMES[p]} non compatible`,
-                              `${OPERATOR_NAMES[p]} ne propose pas ce service via agent.`);
-                            return;
-                          }
-                          setSelectedProvider(p);
-                          setSelectedBundle(null);
-                        }}
+                        className={`provider-btn ${p} ${isSelected ? 'selected' : ''}`}
+                        onClick={() => { setSelectedProvider(p); setSelectedBundle(null); }}
                       >
                         <img src={OPERATOR_LOGOS[p]} alt={OPERATOR_NAMES[p]} className="provider-logo-img" />
                         {OPERATOR_NAMES[p]}
-                        {!supported && <span className="unavailable-badge"><Ban size={10}/> N/D</span>}
-                        {supported && detectedOp === p && <span className={`detected-badge ${p}`}>Détecté</span>}
+                        {detectedOp === p && <span className={`detected-badge ${p}`}>Détecté</span>}
                       </div>
                     );
                   })}
@@ -860,26 +895,43 @@ function App() {
                 </div>
               </div>
 
-              {/* Internet: Bundle selector */}
-              {activeOperation === 'internet' && (
-                <div className="form-group">
-                  <label>Choisir un forfait</label>
-                  <div className="bundle-grid">
-                    {(INTERNET_BUNDLES[selectedProvider] || []).map(b => (
-                      <div key={b.id}
-                        className={`bundle-card${selectedBundle?.id === b.id ? ' selected' : ''}`}
-                        style={selectedBundle?.id === b.id ? {'--bundle-color': OP_CONFIG.internet.color} : {}}
-                        onClick={() => setSelectedBundle(b)}
-                      >
-                        {b.tag && <span className="bundle-tag">{b.tag}</span>}
-                        <div className="bundle-size">{b.label}</div>
-                        <div className="bundle-price">{new Intl.NumberFormat('fr-FR').format(b.price)} F</div>
-                        <div className="bundle-validity">{b.validity}</div>
-                      </div>
-                    ))}
+              {/* Internet: Bundle selector par catégorie */}
+              {activeOperation === 'internet' && (() => {
+                const opBundles = INTERNET_BUNDLES[selectedProvider] || {};
+                const cats = [
+                  { key: 'daily',   label: '⏱ Journalier' },
+                  { key: 'weekly',  label: '📅 Hebdomadaire' },
+                  { key: 'monthly', label: '🗓 Mensuel' },
+                ];
+                return (
+                  <div className="form-group">
+                    <label>Choisir un forfait</label>
+                    {cats.map(({ key, label }) => {
+                      const bundles = opBundles[key] || [];
+                      if (!bundles.length) return null;
+                      return (
+                        <div key={key} className="bundle-category">
+                          <div className="bundle-cat-label">{label}</div>
+                          <div className="bundle-grid">
+                            {bundles.map(b => (
+                              <div key={b.id}
+                                className={`bundle-card${selectedBundle?.id === b.id ? ' selected' : ''}`}
+                                style={selectedBundle?.id === b.id ? {'--bundle-color': OP_CONFIG.internet.color} : {}}
+                                onClick={() => setSelectedBundle(b)}
+                              >
+                                {b.tag && <span className="bundle-tag">{b.tag}</span>}
+                                <div className="bundle-size">{b.label}</div>
+                                <div className="bundle-price">{new Intl.NumberFormat('fr-FR').format(b.price)} F</div>
+                                <div className="bundle-validity">{b.validity}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* Amount field — not shown for internet */}
               {activeOperation !== 'internet' && (
@@ -1149,10 +1201,13 @@ function App() {
                <span>Nom :</span> <strong>{agentName}</strong>
              </div>
              <div className="profile-info-row" style={{marginTop: '10px'}}>
+               <span>Email :</span> <strong>ibrahim.doumbi098@gmail.com</strong>
+             </div>
+             <div className="profile-info-row" style={{marginTop: '10px'}}>
                <span>Identifiant Agence :</span> <strong>ABJ-001</strong>
              </div>
              <div className="profile-info-row" style={{marginTop: '10px'}}>
-               <span>Localisation :</span> <strong>Abidjan, Cocody</strong>
+               <span>Localisation :</span> <strong>Abidjan, Côte d'Ivoire</strong>
              </div>
           </div>
         </div>
@@ -1370,6 +1425,13 @@ function App() {
               <Menu size={24} color="white" />
             </button>
           </div>
+
+          {/* Floating hamburger — desktop only, visible when sidebar is collapsed */}
+          {sidebarCollapsed && (
+            <button className="sidebar-float-btn" onClick={toggleSidebar} title="Ouvrir la navigation">
+              <Menu size={18}/>
+            </button>
+          )}
 
           {/* Sidebar */}
           <aside className={`sidebar ${mobileMenuOpen ? 'open' : ''} ${sidebarCollapsed ? 'collapsed' : ''}`}>

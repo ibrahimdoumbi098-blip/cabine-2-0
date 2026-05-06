@@ -256,7 +256,9 @@ async function initDb() {
       await pool.query(txPg);
       const res = await pool.query('SELECT * FROM wallets WHERE id = 1');
       if (res.rows.length === 0) {
-        await pool.query('INSERT INTO wallets (id, agent_name, balance, pin) VALUES (1, $1, $2, $3)', ['Kouassi B.', 2450000, '1234']);
+        await pool.query('INSERT INTO wallets (id, agent_name, balance, pin) VALUES (1, $1, $2, $3)', ['Ibrahim Doumbia', 2450000, '1234']);
+      } else if (res.rows[0].agent_name === 'Kouassi B.') {
+        await pool.query('UPDATE wallets SET agent_name = $1 WHERE id = 1', ['Ibrahim Doumbia']);
       }
     } else {
       await new Promise((resolve) => {
@@ -265,7 +267,9 @@ async function initDb() {
           sqliteDb.run(txSqlite);
           sqliteDb.get('SELECT * FROM wallets WHERE id = 1', (err, row) => {
             if (!row) {
-              sqliteDb.run('INSERT INTO wallets (agent_name, balance, pin) VALUES (?, ?, ?)', ['Kouassi B.', 2450000, '1234']);
+              sqliteDb.run('INSERT INTO wallets (agent_name, balance, pin) VALUES (?, ?, ?)', ['Ibrahim Doumbia', 2450000, '1234']);
+            } else if (row.agent_name === 'Kouassi B.') {
+              sqliteDb.run('UPDATE wallets SET agent_name = ? WHERE id = 1', ['Ibrahim Doumbia']);
             }
             resolve();
           });
@@ -474,16 +478,26 @@ async function pollPayoutStatus(reference, txId, maxAttempts = 10) {
   console.warn(`⚠️ TX ${txId} timeout après ${maxAttempts} tentatives. Vérification manuelle requise.`);
 }
 
-// Init GeniusPay on startup
+// Init GeniusPay with retry (3 attempts, 5s apart)
 (async () => {
-  if (GENIUSPAY_API_KEY || GENIUSPAY_PK) {
-    await checkGeniusPayConnection();
-    if (geniusPayConnected && !discoveredWalletId) {
-      await discoverWallet();
-    }
-  } else {
-    console.warn('⚠️ Aucune clé GeniusPay configurée. Mode simulateur activé.');
+  if (!GENIUSPAY_API_KEY && !GENIUSPAY_PK) {
+    console.warn('⚠️ Aucune clé GeniusPay. Mode simulateur activé.');
+    return;
   }
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await checkGeniusPayConnection();
+      if (geniusPayConnected) {
+        if (!discoveredWalletId) await discoverWallet();
+        console.log(`✅ GeniusPay initialisé (tentative ${attempt})`);
+        return;
+      }
+    } catch (e) {
+      console.warn(`⚠️ GeniusPay init tentative ${attempt}/3 échouée:`, e.message);
+    }
+    if (attempt < 3) await new Promise(r => setTimeout(r, 5000));
+  }
+  console.warn('⚠️ GeniusPay indisponible après 3 tentatives. Simulateur actif.');
 })();
 
 // ==========================================
