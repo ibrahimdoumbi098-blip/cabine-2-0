@@ -674,6 +674,92 @@ app.post('/api/retrait', rateLimiter, async (req, res) => {
   }
 });
 
+// === AIRTIME — Recharge crédit téléphonique ===
+app.post('/api/airtime', rateLimiter, async (req, res) => {
+  const { provider, phone, amount, pin } = req.body;
+  const numAmount = parseInt(amount, 10);
+
+  if (!provider || !phone || !numAmount || numAmount <= 0)
+    return res.status(400).json({ error: 'Données invalides.' });
+  if (!pin) return res.status(401).json({ error: 'Code PIN requis.' });
+
+  try {
+    const wallet = await queryGet('SELECT balance, pin FROM wallets WHERE id = 1');
+    if (wallet.pin !== pin)
+      return res.status(403).json({ error: 'Code PIN incorrect. Opération refusée.' });
+    if (wallet.balance < numAmount)
+      return res.status(400).json({ error: 'Solde insuffisant.' });
+
+    const newBalance = wallet.balance - numAmount;
+    await queryRunUpdate('UPDATE wallets SET balance = ? WHERE id = 1', [newBalance]);
+
+    const txId = await queryRunInsert(
+      'INSERT INTO transactions (wallet_id, type, provider, phone, amount, status) VALUES (?, ?, ?, ?, ?, ?)',
+      [1, 'AIRTIME', provider, phone, numAmount, 'PENDING']
+    );
+
+    res.json({ message: 'Recharge initiée', txId, status: 'PENDING', newBalance });
+
+    await new Promise(r => setTimeout(r, 1000 + Math.random() * 800));
+    const ok = Math.random() > 0.02;
+    if (ok) {
+      const ref = `SIM-AIR-${Date.now()}`;
+      await queryRunUpdate('UPDATE transactions SET status = ?, geniuspay_ref = ? WHERE id = ?', ['SUCCESS', ref, txId]);
+      log('INFO', `Airtime TX ${txId} SUCCÈS`, { ref, amount: numAmount, provider });
+    } else {
+      await queryRunUpdate('UPDATE transactions SET status = ? WHERE id = ?', ['FAILED', txId]);
+      await queryRunUpdate('UPDATE wallets SET balance = balance + ? WHERE id = 1', [numAmount]);
+      log('WARN', `Airtime TX ${txId} ÉCHEC. Remboursé.`);
+    }
+  } catch (err) {
+    log('ERROR', 'Airtime error', { error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// === INTERNET — Activation forfait data ===
+app.post('/api/internet', rateLimiter, async (req, res) => {
+  const { provider, phone, amount, bundle, pin } = req.body;
+  const numAmount = parseInt(amount, 10);
+
+  if (!provider || !phone || !numAmount || numAmount <= 0 || !bundle)
+    return res.status(400).json({ error: 'Données invalides.' });
+  if (!pin) return res.status(401).json({ error: 'Code PIN requis.' });
+
+  try {
+    const wallet = await queryGet('SELECT balance, pin FROM wallets WHERE id = 1');
+    if (wallet.pin !== pin)
+      return res.status(403).json({ error: 'Code PIN incorrect. Opération refusée.' });
+    if (wallet.balance < numAmount)
+      return res.status(400).json({ error: 'Solde insuffisant.' });
+
+    const newBalance = wallet.balance - numAmount;
+    await queryRunUpdate('UPDATE wallets SET balance = ? WHERE id = 1', [newBalance]);
+
+    const txId = await queryRunInsert(
+      'INSERT INTO transactions (wallet_id, type, provider, phone, amount, status) VALUES (?, ?, ?, ?, ?, ?)',
+      [1, 'INTERNET', provider, phone, numAmount, 'PENDING']
+    );
+
+    res.json({ message: 'Forfait en cours d\'activation', txId, status: 'PENDING', newBalance });
+
+    await new Promise(r => setTimeout(r, 2000 + Math.random() * 1500));
+    const ok = Math.random() > 0.02;
+    if (ok) {
+      const ref = `SIM-NET-${bundle.id}-${Date.now()}`;
+      await queryRunUpdate('UPDATE transactions SET status = ?, geniuspay_ref = ? WHERE id = ?', ['SUCCESS', ref, txId]);
+      log('INFO', `Internet TX ${txId} SUCCÈS`, { ref, bundle: bundle.label, amount: numAmount, provider });
+    } else {
+      await queryRunUpdate('UPDATE transactions SET status = ? WHERE id = ?', ['FAILED', txId]);
+      await queryRunUpdate('UPDATE wallets SET balance = balance + ? WHERE id = 1', [numAmount]);
+      log('WARN', `Internet TX ${txId} ÉCHEC. Remboursé.`);
+    }
+  } catch (err) {
+    log('ERROR', 'Internet error', { error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // === WEBHOOK GENIUSPAY ===
 app.post('/api/webhooks/geniuspay', async (req, res) => {
   const signature = req.headers['x-webhook-signature'];

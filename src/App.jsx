@@ -4,7 +4,7 @@ import {
   History, Settings, LogOut, Globe, Zap, CheckCircle2, Clock,
   XCircle, RefreshCw, Menu, Delete, Printer, Share2, Lock,
   Radio, AlertTriangle, Info, X, Download, Send,
-  TrendingUp, TrendingDown, BarChart2, Star
+  TrendingUp, TrendingDown, BarChart2, Star, Wifi
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import './App.css';
@@ -20,6 +20,100 @@ const OPERATOR_LOGOS = {
 };
 const OPERATOR_NAMES = { orange: 'Orange', mtn: 'MTN', wave: 'Wave', moov: 'Moov' };
 const OPERATOR_COLORS = { orange: '#ff6600', mtn: '#ffcc00', wave: '#1ba4e6', moov: '#F37021' };
+
+// === INTERNET BUNDLES PER OPERATOR ===
+const INTERNET_BUNDLES = {
+  orange: [
+    { id: 'o-100m', label: '100 Mo', price: 200, validity: '24h', tag: null },
+    { id: 'o-500m', label: '500 Mo', price: 500, validity: '7 jours', tag: null },
+    { id: 'o-1g',   label: '1 Go',   price: 1000, validity: '30 jours', tag: 'Populaire' },
+    { id: 'o-5g',   label: '5 Go',   price: 4500, validity: '30 jours', tag: null },
+    { id: 'o-10g',  label: '10 Go',  price: 8000, validity: '30 jours', tag: 'Top valeur' },
+  ],
+  mtn: [
+    { id: 'm-100m', label: '100 Mo', price: 200, validity: '24h', tag: null },
+    { id: 'm-1g',   label: '1 Go',   price: 1000, validity: '30 jours', tag: 'Populaire' },
+    { id: 'm-3g',   label: '3 Go',   price: 2500, validity: '30 jours', tag: null },
+    { id: 'm-10g',  label: '10 Go',  price: 7500, validity: '30 jours', tag: 'Top valeur' },
+    { id: 'm-20g',  label: '20 Go',  price: 13000, validity: '30 jours', tag: null },
+  ],
+  wave: [
+    { id: 'w-500m', label: '500 Mo', price: 500, validity: '7 jours', tag: null },
+    { id: 'w-2g',   label: '2 Go',   price: 1500, validity: '30 jours', tag: 'Populaire' },
+    { id: 'w-5g',   label: '5 Go',   price: 3000, validity: '30 jours', tag: 'Top valeur' },
+    { id: 'w-10g',  label: '10 Go',  price: 5000, validity: '30 jours', tag: null },
+  ],
+  moov: [
+    { id: 'mo-200m', label: '200 Mo', price: 300, validity: '24h', tag: null },
+    { id: 'mo-1g',   label: '1 Go',   price: 900, validity: '30 jours', tag: 'Populaire' },
+    { id: 'mo-5g',   label: '5 Go',   price: 4000, validity: '30 jours', tag: null },
+    { id: 'mo-10g',  label: '10 Go',  price: 7000, validity: '30 jours', tag: 'Top valeur' },
+  ],
+};
+
+// === OPERATION CONFIG — single source of truth ===
+const OP_CONFIG = {
+  transfer: {
+    color: '#6366f1', glowColor: 'rgba(99,102,241,0.28)',
+    label: 'Transfert',
+    headerLabel: 'Nouveau Transfert Inter-Réseaux',
+    headerIcon: 'ArrowUpRight',
+    submitLabel: 'Valider la transaction',
+    amountLabel: 'Montant à transférer',
+    phoneLabel: 'Numéro du destinataire',
+    confirmTitle: 'Confirmer la transaction',
+    confirmPhoneLabel: 'Numéro',
+    confirmAmountLabel: 'Montant',
+    infoBanner: null,
+    endpoint: '/api/transfer',
+    txSign: '-', txColorVar: 'var(--text-dark)',
+  },
+  withdraw: {
+    color: '#10b981', glowColor: 'rgba(16,185,129,0.28)',
+    label: 'Retrait',
+    headerLabel: 'Nouveau Retrait Mobile Money',
+    headerIcon: 'ArrowDownToLine',
+    submitLabel: 'Valider le retrait',
+    amountLabel: 'Montant du retrait',
+    phoneLabel: 'Numéro du client',
+    confirmTitle: 'Confirmer le retrait',
+    confirmPhoneLabel: 'Numéro client',
+    confirmAmountLabel: 'Montant à encaisser',
+    infoBanner: 'Le client vous envoie les fonds — votre solde sera crédité après confirmation.',
+    endpoint: '/api/retrait',
+    txSign: '+', txColorVar: 'var(--accent-green)',
+  },
+  airtime: {
+    color: '#f59e0b', glowColor: 'rgba(245,158,11,0.28)',
+    label: 'Crédit',
+    headerLabel: 'Recharge Crédit Téléphonique',
+    headerIcon: 'PhoneCall',
+    submitLabel: 'Recharger le crédit',
+    amountLabel: 'Montant de la recharge',
+    phoneLabel: 'Numéro à recharger',
+    confirmTitle: 'Confirmer la recharge',
+    confirmPhoneLabel: 'Numéro',
+    confirmAmountLabel: 'Montant recharge',
+    infoBanner: 'Le crédit sera envoyé instantanément sur le numéro indiqué.',
+    endpoint: '/api/airtime',
+    txSign: '-', txColorVar: 'var(--accent-yellow)',
+  },
+  internet: {
+    color: '#3b82f6', glowColor: 'rgba(59,130,246,0.28)',
+    label: 'Internet',
+    headerLabel: 'Forfait Internet Mobile',
+    headerIcon: 'Wifi',
+    submitLabel: 'Activer le forfait',
+    amountLabel: null,
+    phoneLabel: 'Numéro à connecter',
+    confirmTitle: 'Confirmer le forfait',
+    confirmPhoneLabel: 'Numéro',
+    confirmAmountLabel: 'Forfait',
+    infoBanner: 'Le forfait sera activé dans les 2–5 minutes après confirmation.',
+    endpoint: '/api/internet',
+    txSign: '-', txColorVar: 'var(--accent-blue)',
+  },
+};
 
 // === AUTO-DETECT OPERATOR FROM PHONE NUMBER (Côte d'Ivoire) ===
 function detectOperator(phone) {
@@ -173,6 +267,7 @@ function App() {
   const [darkMode, setDarkMode] = useState(false);
   const [activeOperation, setActiveOperation] = useState('transfer');
   const [analytics, setAnalytics] = useState(null);
+  const [selectedBundle, setSelectedBundle] = useState(null);
   const [contacts, setContacts] = useState(() => {
     try { return JSON.parse(localStorage.getItem('cabine_contacts') || '[]'); }
     catch { return []; }
@@ -288,21 +383,30 @@ function App() {
       if (pendingTxRef.current) {
         const tx = txData.find(t => t.id === pendingTxRef.current);
         if (tx) {
+          const fmtAmt = new Intl.NumberFormat('fr-FR').format(tx.amount);
           if (tx.status === 'SUCCESS') {
             setReceiptData(tx);
             pendingTxRef.current = null;
             if (tx.type === 'RETRAIT') {
-              addToast('success', 'Retrait réussi', `+${new Intl.NumberFormat('fr-FR').format(tx.amount)} F encaissés depuis ${tx.phone}`);
+              addToast('success', 'Retrait réussi !', `+${fmtAmt} F encaissés depuis ${tx.phone}`);
+            } else if (tx.type === 'AIRTIME') {
+              addToast('success', 'Crédit envoyé !', `${fmtAmt} FCFA rechargés sur ${tx.phone}`);
+            } else if (tx.type === 'INTERNET') {
+              addToast('success', 'Forfait activé !', `Forfait internet activé sur ${tx.phone}`);
             } else {
-              addToast('success', 'Transaction réussie', `${new Intl.NumberFormat('fr-FR').format(tx.amount)} F envoyés à ${tx.phone}`);
+              addToast('success', 'Transaction réussie !', `${fmtAmt} F envoyés à ${tx.phone}`);
             }
           } else if (tx.status === 'FAILED') {
+            pendingTxRef.current = null;
             if (tx.type === 'RETRAIT') {
               addToast('error', 'Retrait échoué', `Le client n'a pas pu envoyer les fonds. Solde non débité.`);
+            } else if (tx.type === 'AIRTIME') {
+              addToast('error', 'Recharge échouée', `La recharge crédit a échoué. Solde recrédité.`);
+            } else if (tx.type === 'INTERNET') {
+              addToast('error', 'Forfait non activé', `L'activation du forfait a échoué. Solde recrédité.`);
             } else {
-              addToast('error', 'Transaction échouée', `${new Intl.NumberFormat('fr-FR').format(tx.amount)} F vers ${tx.phone} — Solde recrédité.`);
+              addToast('error', 'Transaction échouée', `${fmtAmt} F vers ${tx.phone} — Solde recrédité.`);
             }
-            pendingTxRef.current = null;
           }
         }
       }
@@ -332,7 +436,15 @@ function App() {
 
   const initiateTransfer = (e) => {
     e.preventDefault();
-    if (!amount || !phone) return;
+    if (!phone) return;
+    if (activeOperation === 'internet') {
+      if (!selectedBundle) {
+        addToast('warning', 'Forfait requis', 'Veuillez sélectionner un forfait internet.');
+        return;
+      }
+    } else {
+      if (!amount) return;
+    }
     setShowConfirmModal(true);
   };
 
@@ -359,19 +471,26 @@ function App() {
 
   const executeTransfer = async (enteredPin) => {
     setIsProcessing(true);
-    const isRetrait = activeOperation === 'withdraw';
-    const endpoint = isRetrait ? `${API_URL}/retrait` : `${API_URL}/transfer`;
+    const cfg = OP_CONFIG[activeOperation];
+    const numAmount = activeOperation === 'internet'
+      ? selectedBundle.price
+      : parseInt(amount, 10);
 
     try {
-      const response = await fetch(endpoint, {
+      const body = {
+        provider: selectedProvider,
+        phone,
+        amount: numAmount,
+        pin: enteredPin,
+      };
+      if (activeOperation === 'internet' && selectedBundle) {
+        body.bundle = selectedBundle;
+      }
+
+      const response = await fetch(cfg.endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider: selectedProvider,
-          phone: phone,
-          amount: amount,
-          pin: enteredPin
-        }),
+        body: JSON.stringify(body),
       });
 
       const result = await response.json();
@@ -380,10 +499,16 @@ function App() {
         pendingTxRef.current = result.txId;
         setAmount('');
         setPhone('');
+        setSelectedBundle(null);
         setShowPinModal(false);
         fetchData();
-        if (isRetrait) {
-          addToast('info', 'Retrait initié', `Encaissement de ${new Intl.NumberFormat('fr-FR').format(parseInt(amount))} FCFA en cours...`);
+        const fmtAmt = new Intl.NumberFormat('fr-FR').format(numAmount);
+        if (activeOperation === 'withdraw') {
+          addToast('info', 'Retrait initié', `Encaissement de ${fmtAmt} FCFA en cours...`);
+        } else if (activeOperation === 'airtime') {
+          addToast('info', 'Recharge en cours', `${fmtAmt} FCFA de crédit envoyé sur ${phone}...`);
+        } else if (activeOperation === 'internet') {
+          addToast('info', 'Forfait en cours d\'activation', `${selectedBundle?.label} en cours sur ${phone}...`);
         } else {
           addToast('info', 'Transaction initiée', `Traitement via GeniusPay ${result.mode === 'sandbox' ? '(Sandbox)' : ''}...`);
         }
@@ -567,47 +692,55 @@ function App() {
 
       <div className="action-nav animate-in" style={{animationDelay: '0.05s'}}>
         {[
-          { id: 'transfer', icon: <ArrowUpRight size={20}/>, label: 'Transfert', available: true },
-          { id: 'withdraw', icon: <ArrowDownToLine size={20}/>, label: 'Retrait', available: true },
-          { id: 'airtime', icon: <PhoneCall size={20}/>, label: 'Crédit', available: false },
-          { id: 'internet', icon: <Globe size={20}/>, label: 'Internet', available: false },
-        ].map(tab => (
-          <div key={tab.id}
-            className={`action-tab ${tab.id === activeOperation ? 'active' : ''}`}
-            onClick={() => {
-              if (tab.available) {
+          { id: 'transfer', icon: <ArrowUpRight size={20}/>, label: 'Transfert' },
+          { id: 'withdraw', icon: <ArrowDownToLine size={20}/>, label: 'Retrait' },
+          { id: 'airtime',  icon: <PhoneCall size={20}/>, label: 'Crédit' },
+          { id: 'internet', icon: <Wifi size={20}/>, label: 'Internet' },
+        ].map(tab => {
+          const isActive = tab.id === activeOperation;
+          const cfg = OP_CONFIG[tab.id];
+          return (
+            <div key={tab.id}
+              className={`action-tab ${isActive ? 'active' : ''}`}
+              style={isActive ? { '--tab-color': cfg.color, '--tab-glow': cfg.glowColor } : {}}
+              onClick={() => {
                 setActiveOperation(tab.id);
                 setAmount('');
                 setPhone('');
-              } else {
-                addToast('info', 'Bientôt disponible', `La fonctionnalité ${tab.label} sera disponible prochainement.`);
-              }
-            }}
-          >
-            <div className="tab-icon">{tab.icon}</div>
-            <span>{tab.label}</span>
-          </div>
-        ))}
+                setSelectedBundle(null);
+              }}
+            >
+              <div className="tab-icon">{tab.icon}</div>
+              <span>{tab.label}</span>
+            </div>
+          );
+        })}
       </div>
 
       <div className="working-area animate-in" style={{animationDelay: '0.1s'}}>
         {/* Operation Panel */}
-        <div className="card">
-          <div className="card-header">
-            {activeOperation === 'withdraw'
-              ? <><ArrowDownToLine size={16} style={{marginRight:6,verticalAlign:'middle',color:'var(--accent-green)'}}/>Nouveau Retrait Mobile Money</>
-              : <><ArrowUpRight size={16} style={{marginRight:6,verticalAlign:'middle',color:'var(--accent-primary)'}}/>Nouveau Transfert Inter-Réseaux</>
-            }
+        <div className="card" key={activeOperation}>
+          <div className="card-header" style={{borderBottom: `2px solid ${OP_CONFIG[activeOperation].color}22`}}>
+            <span style={{
+              display:'inline-flex', alignItems:'center', gap:6,
+              color: OP_CONFIG[activeOperation].color, fontWeight:700
+            }}>
+              {activeOperation === 'transfer' && <ArrowUpRight size={16}/>}
+              {activeOperation === 'withdraw' && <ArrowDownToLine size={16}/>}
+              {activeOperation === 'airtime'  && <PhoneCall size={16}/>}
+              {activeOperation === 'internet' && <Wifi size={16}/>}
+              {OP_CONFIG[activeOperation].headerLabel}
+            </span>
           </div>
-          <div className="card-body">
+          <div className="card-body animate-in">
             <form onSubmit={initiateTransfer}>
               <div className="form-group">
-                <label>Réseau de destination</label>
+                <label>Réseau {activeOperation === 'internet' ? 'mobile' : 'de destination'}</label>
                 <div className="provider-grid">
                   {['orange', 'mtn', 'wave', 'moov'].map(p => (
                     <div key={p}
                       className={`provider-btn ${p} ${selectedProvider === p ? 'selected' : ''}`}
-                      onClick={() => setSelectedProvider(p)}
+                      onClick={() => { setSelectedProvider(p); setSelectedBundle(null); }}
                     >
                       <img src={OPERATOR_LOGOS[p]} alt={OPERATOR_NAMES[p]} className="provider-logo-img" />
                       {OPERATOR_NAMES[p]}
@@ -628,7 +761,7 @@ function App() {
                           setSelectedProvider(c.operator);
                         }}
                       >
-                        <img src={OPERATOR_LOGOS[c.operator]} alt="" style={{width: 14, height: 14, borderRadius: 3}}/>
+                        <img src={OPERATOR_LOGOS[c.operator]} alt="" style={{width:14,height:14,borderRadius:3}}/>
                         {formatPhoneDisplay(c.phone)}
                       </button>
                     ))}
@@ -637,7 +770,7 @@ function App() {
               )}
 
               <div className="form-group">
-                <label>Numéro du client</label>
+                <label>{OP_CONFIG[activeOperation].phoneLabel}</label>
                 <div className="phone-field-row">
                   <input
                     type="tel"
@@ -652,43 +785,74 @@ function App() {
                     className="save-contact-btn"
                     onClick={saveContact}
                     title="Sauvegarder ce contact"
-                    disabled={!phone || phone.replace(/\s/g, '').length < 8}
+                    disabled={!phone || phone.replace(/\s/g,'').length < 8}
                   >
                     <Star size={14}/>
                   </button>
                 </div>
               </div>
 
-              <div className="form-group">
-                <label>{activeOperation === 'withdraw' ? 'Montant du retrait' : 'Montant à transférer'}</label>
-                <div className="amount-input">
-                  <input
-                    type="number"
-                    placeholder="0"
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                    required min="100"
-                  />
-                  <span className="currency">FCFA</span>
+              {/* Internet: Bundle selector */}
+              {activeOperation === 'internet' && (
+                <div className="form-group">
+                  <label>Choisir un forfait</label>
+                  <div className="bundle-grid">
+                    {(INTERNET_BUNDLES[selectedProvider] || []).map(b => (
+                      <div key={b.id}
+                        className={`bundle-card${selectedBundle?.id === b.id ? ' selected' : ''}`}
+                        style={selectedBundle?.id === b.id ? {'--bundle-color': OP_CONFIG.internet.color} : {}}
+                        onClick={() => setSelectedBundle(b)}
+                      >
+                        {b.tag && <span className="bundle-tag">{b.tag}</span>}
+                        <div className="bundle-size">{b.label}</div>
+                        <div className="bundle-price">{new Intl.NumberFormat('fr-FR').format(b.price)} F</div>
+                        <div className="bundle-validity">{b.validity}</div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
 
-              {activeOperation === 'withdraw' && (
-                <div className="retrait-info-banner">
-                  <ArrowDownToLine size={14}/>
-                  Le client vous envoie les fonds — votre solde sera crédité après confirmation.
+              {/* Amount field — not shown for internet */}
+              {activeOperation !== 'internet' && (
+                <div className="form-group">
+                  <label>{OP_CONFIG[activeOperation].amountLabel}</label>
+                  <div className="amount-input">
+                    <input
+                      type="number"
+                      placeholder="0"
+                      value={amount}
+                      onChange={(e) => setAmount(e.target.value)}
+                      required min="100"
+                    />
+                    <span className="currency">FCFA</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Info banner per operation */}
+              {OP_CONFIG[activeOperation].infoBanner && (
+                <div className={`op-info-banner op-info-banner--${activeOperation}`}>
+                  {activeOperation === 'withdraw' && <ArrowDownToLine size={14}/>}
+                  {activeOperation === 'airtime'  && <PhoneCall size={14}/>}
+                  {activeOperation === 'internet' && <Wifi size={14}/>}
+                  {OP_CONFIG[activeOperation].infoBanner}
                 </div>
               )}
 
               <button type="submit"
-                className={`submit-btn${activeOperation === 'withdraw' ? ' retrait' : ''}`}
-                disabled={isProcessing || pendingTxRef.current}
+                className={`submit-btn submit-btn--${activeOperation}`}
+                disabled={isProcessing || !!pendingTxRef.current}
+                style={{'--op-color': OP_CONFIG[activeOperation].color, '--op-glow': OP_CONFIG[activeOperation].glowColor}}
               >
                 {pendingTxRef.current
-                  ? <RefreshCw size={20} style={{animation: 'spin 1s linear infinite'}}/>
-                  : activeOperation === 'withdraw'
-                    ? <><ArrowDownToLine size={18}/> Valider le retrait</>
-                    : <><Send size={18}/> Valider la transaction</>
+                  ? <RefreshCw size={20} style={{animation:'spin 1s linear infinite'}}/>
+                  : <>{activeOperation === 'transfer' && <Send size={18}/>}
+                      {activeOperation === 'withdraw' && <ArrowDownToLine size={18}/>}
+                      {activeOperation === 'airtime'  && <PhoneCall size={18}/>}
+                      {activeOperation === 'internet' && <Wifi size={18}/>}
+                      {' '}{OP_CONFIG[activeOperation].submitLabel}
+                    </>
                 }
               </button>
             </form>
@@ -716,7 +880,11 @@ function App() {
                       </div>
                     </div>
                     <div className={`tx-amount`}>
-                      <p style={{fontWeight: '600', textDecoration: tx.status === 'FAILED' ? 'line-through' : 'none', color: tx.status === 'FAILED' ? 'var(--text-muted)' : tx.type === 'RETRAIT' ? 'var(--accent-green)' : 'var(--text-dark)'}}>
+                      <p style={{fontWeight:'600', textDecoration: tx.status==='FAILED'?'line-through':'none',
+                        color: tx.status==='FAILED' ? 'var(--text-muted)' :
+                          tx.type==='RETRAIT' ? 'var(--accent-green)' :
+                          tx.type==='AIRTIME' ? 'var(--accent-yellow)' :
+                          tx.type==='INTERNET' ? 'var(--accent-blue)' : 'var(--text-dark)'}}>
                         {tx.type === 'RETRAIT' ? '+' : '-'} {new Intl.NumberFormat('fr-FR').format(tx.amount)} F
                       </p>
                       {getStatusBadge(tx.status)}
@@ -791,7 +959,9 @@ function App() {
                     <img src={OPERATOR_LOGOS[tx.provider]} alt={tx.provider} className="tx-logo" />
                     <div className="tx-details">
                       <p style={{fontWeight: '600'}}>
-                        {tx.type === 'RETRAIT' && <span className="type-badge retrait">Retrait</span>}
+                        {tx.type === 'RETRAIT'   && <span className="type-badge retrait">Retrait</span>}
+                        {tx.type === 'AIRTIME'   && <span className="type-badge airtime">Crédit</span>}
+                        {tx.type === 'INTERNET'  && <span className="type-badge internet">Internet</span>}
                         {OPERATOR_NAMES[tx.provider] || tx.provider}
                         <span style={{fontSize:'11px', color:'var(--text-muted)', fontWeight:'normal', marginLeft:'6px'}}>{new Date(tx.created_at).toLocaleString('fr-FR')}</span>
                       </p>
@@ -800,7 +970,11 @@ function App() {
                   </div>
                   <div className="tx-actions-row">
                     <div className="tx-amount" style={{textAlign: 'right'}}>
-                      <p style={{fontWeight: '600', textDecoration: tx.status === 'FAILED' ? 'line-through' : 'none', color: tx.status === 'FAILED' ? 'var(--text-muted)' : tx.type === 'RETRAIT' ? 'var(--accent-green)' : 'var(--text-dark)'}}>
+                      <p style={{fontWeight:'600', textDecoration: tx.status==='FAILED'?'line-through':'none',
+                        color: tx.status==='FAILED' ? 'var(--text-muted)' :
+                          tx.type==='RETRAIT' ? 'var(--accent-green)' :
+                          tx.type==='AIRTIME' ? 'var(--accent-yellow)' :
+                          tx.type==='INTERNET' ? 'var(--accent-blue)' : 'var(--text-dark)'}}>
                         {tx.type === 'RETRAIT' ? '+' : '-'} {new Intl.NumberFormat('fr-FR').format(tx.amount)} F
                       </p>
                       {getStatusBadge(tx.status)}
@@ -1172,48 +1346,64 @@ function App() {
           </main>
 
           {/* --- CONFIRMATION MODAL --- */}
-          {showConfirmModal && (
-            <div className="modal-overlay">
-              <div className="confirm-modal">
-                <h3>{activeOperation === 'withdraw' ? 'Confirmer le retrait' : 'Confirmer la transaction'}</h3>
-                {activeOperation === 'withdraw' && (
-                  <p style={{textAlign:'center', fontSize:'13px', color:'var(--text-muted)', marginBottom:'16px'}}>
-                    Le client vous envoie les fonds depuis son mobile money.
-                  </p>
-                )}
-                <div className="confirm-summary">
-                  <div className="confirm-row">
-                    <span>Opérateur</span>
-                    <span className="confirm-value">
-                      <img src={OPERATOR_LOGOS[selectedProvider]} alt="" style={{width: 22, height: 22, borderRadius: 6, verticalAlign: 'middle', marginRight: 6}} />
-                      {OPERATOR_NAMES[selectedProvider]}
-                    </span>
+          {showConfirmModal && (() => {
+            const cfg = OP_CONFIG[activeOperation];
+            const displayAmount = activeOperation === 'internet'
+              ? selectedBundle?.price
+              : parseInt(amount, 10);
+            return (
+              <div className="modal-overlay">
+                <div className="confirm-modal" style={{'--confirm-color': cfg.color}}>
+                  <div className="confirm-modal-icon" style={{background: `${cfg.color}18`, color: cfg.color}}>
+                    {activeOperation === 'transfer' && <ArrowUpRight size={22}/>}
+                    {activeOperation === 'withdraw' && <ArrowDownToLine size={22}/>}
+                    {activeOperation === 'airtime'  && <PhoneCall size={22}/>}
+                    {activeOperation === 'internet' && <Wifi size={22}/>}
                   </div>
-                  <div className="confirm-row">
-                    <span>{activeOperation === 'withdraw' ? 'Numéro client' : 'Numéro'}</span>
-                    <span className="confirm-value">{phone}</span>
+                  <h3>{cfg.confirmTitle}</h3>
+                  <div className="confirm-summary">
+                    <div className="confirm-row">
+                      <span>Opérateur</span>
+                      <span className="confirm-value">
+                        <img src={OPERATOR_LOGOS[selectedProvider]} alt="" style={{width:22,height:22,borderRadius:6,verticalAlign:'middle',marginRight:6}}/>
+                        {OPERATOR_NAMES[selectedProvider]}
+                      </span>
+                    </div>
+                    <div className="confirm-row">
+                      <span>{cfg.confirmPhoneLabel}</span>
+                      <span className="confirm-value">{phone}</span>
+                    </div>
+                    {activeOperation === 'internet' && selectedBundle && (
+                      <div className="confirm-row">
+                        <span>Forfait</span>
+                        <span className="confirm-value" style={{color: cfg.color}}>
+                          {selectedBundle.label} — {selectedBundle.validity}
+                        </span>
+                      </div>
+                    )}
+                    <div className="confirm-row confirm-total">
+                      <span>{cfg.confirmAmountLabel}</span>
+                      <span className="confirm-value" style={{color: cfg.color}}>
+                        {activeOperation === 'withdraw' ? '+' : ''}{new Intl.NumberFormat('fr-FR').format(displayAmount)} FCFA
+                      </span>
+                    </div>
                   </div>
-                  <div className="confirm-row">
-                    <span>{activeOperation === 'withdraw' ? 'Montant à encaisser' : 'Montant'}</span>
-                    <span className="confirm-value" style={{color: activeOperation === 'withdraw' ? 'var(--accent-green)' : undefined}}>
-                      {activeOperation === 'withdraw' ? '+' : ''}{new Intl.NumberFormat('fr-FR').format(amount)} FCFA
-                    </span>
+                  <div className="confirm-actions">
+                    <button className="btn-secondary" onClick={() => setShowConfirmModal(false)}>
+                      Annuler
+                    </button>
+                    <button
+                      className="btn-confirm-op"
+                      style={{background: cfg.color, boxShadow: `0 4px 14px ${cfg.glowColor}`}}
+                      onClick={() => { setShowConfirmModal(false); setShowPinModal(true); }}
+                    >
+                      Confirmer
+                    </button>
                   </div>
-                </div>
-                <div className="confirm-actions">
-                  <button className="btn-secondary" onClick={() => setShowConfirmModal(false)}>
-                    Annuler
-                  </button>
-                  <button
-                    className={activeOperation === 'withdraw' ? 'btn-retrait' : 'btn-primary'}
-                    onClick={() => { setShowConfirmModal(false); setShowPinModal(true); }}
-                  >
-                    {activeOperation === 'withdraw' ? 'Confirmer le retrait' : 'Confirmer'}
-                  </button>
                 </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* --- PIN MODAL --- */}
           {showPinModal && (
@@ -1286,7 +1476,7 @@ function App() {
                     </span>
                   </div>
                   <div className="receipt-row">
-                    <span>Destinataire</span>
+                    <span>{receiptData.type === 'AIRTIME' ? 'Numéro rechargé' : receiptData.type === 'INTERNET' ? 'Numéro connecté' : 'Destinataire'}</span>
                     <span style={{fontWeight: 600}}>{receiptData.phone}</span>
                   </div>
                   {receiptData.geniuspay_ref && (
@@ -1297,12 +1487,22 @@ function App() {
                   )}
 
                   <div className="receipt-total">
-                    <span>{receiptData.type === 'RETRAIT' ? 'Montant encaissé' : 'Montant envoyé'}</span>
-                    <h2 style={{color: receiptData.type === 'RETRAIT' ? '#10b981' : '#111827'}}>
+                    <span>
+                      {receiptData.type === 'RETRAIT' ? 'Montant encaissé' :
+                       receiptData.type === 'AIRTIME'  ? 'Crédit envoyé' :
+                       receiptData.type === 'INTERNET' ? 'Forfait activé' : 'Montant envoyé'}
+                    </span>
+                    <h2 style={{color:
+                      receiptData.type === 'RETRAIT'  ? '#10b981' :
+                      receiptData.type === 'AIRTIME'  ? '#f59e0b' :
+                      receiptData.type === 'INTERNET' ? '#3b82f6' : '#111827'}}>
                       {receiptData.type === 'RETRAIT' ? '+' : ''}{new Intl.NumberFormat('fr-FR').format(receiptData.amount)} FCFA
                     </h2>
                     <div className="receipt-status">
-                      <CheckCircle2 size={14} /> {receiptData.type === 'RETRAIT' ? 'Retrait réussi' : 'Transaction réussie'}
+                      <CheckCircle2 size={14} />
+                      {receiptData.type === 'RETRAIT'  ? 'Retrait réussi' :
+                       receiptData.type === 'AIRTIME'  ? 'Recharge réussie' :
+                       receiptData.type === 'INTERNET' ? 'Forfait activé' : 'Transaction réussie'}
                     </div>
                   </div>
 
