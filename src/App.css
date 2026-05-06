@@ -58,16 +58,20 @@
 }
 .sidebar.collapsed { width: 64px; padding: 16px 10px; }
 
-/* Top block: logo + toggle button */
+/* Top block: hamburger + logo */
 .sidebar-top {
-  display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 28px; gap: 6px; min-height: 34px;
+  display: flex; align-items: center;
+  flex-direction: row-reverse; justify-content: flex-end;
+  gap: 10px; margin-bottom: 28px; min-height: 36px;
 }
-.sidebar.collapsed .sidebar-top { flex-direction: column; gap: 12px; margin-bottom: 24px; align-items: center; }
+.sidebar.collapsed .sidebar-top {
+  flex-direction: column; justify-content: center;
+  margin-bottom: 24px; align-items: center;
+}
 
 .sidebar-toggle-btn {
-  width: 26px; height: 26px; border-radius: var(--radius-sm);
-  background: var(--bg-main); border: 1px solid var(--border-color);
+  width: 36px; height: 36px; border-radius: 10px;
+  background: var(--bg-main); border: 1.5px solid var(--border-color);
   display: flex; align-items: center; justify-content: center;
   color: var(--text-muted); cursor: pointer; flex-shrink: 0;
   transition: all var(--transition-fast);
@@ -76,6 +80,7 @@
   background: var(--accent-primary-light);
   border-color: var(--accent-primary);
   color: var(--accent-primary);
+  transform: scale(1.05);
 }
 
 .logo-area {

@@ -439,7 +439,7 @@ function App() {
       setIsLoading(false);
     } catch (error) {
       offlineCount.current += 1;
-      setIsOffline(offlineCount.current >= 8);
+      setIsOffline(offlineCount.current >= 20); // 60s tolerance for cold starts
       setIsLoading(false);
       console.warn(`Tentative ${offlineCount.current} — backend inaccessible`);
     }
@@ -1374,19 +1374,21 @@ function App() {
           {/* Sidebar */}
           <aside className={`sidebar ${mobileMenuOpen ? 'open' : ''} ${sidebarCollapsed ? 'collapsed' : ''}`}>
             <div className="sidebar-top">
-              <div className="logo-area desktop-logo">
-                <div className="logo-icon">
-                  <Zap size={24} color="white" fill="white" />
-                </div>
-                {!sidebarCollapsed && <span>Cabine 2.0</span>}
-              </div>
               <button
                 className="sidebar-toggle-btn"
                 onClick={toggleSidebar}
                 title={sidebarCollapsed ? 'Déplier' : 'Réduire'}
               >
-                {sidebarCollapsed ? <ChevronRight size={15}/> : <ChevronLeft size={15}/>}
+                <Menu size={18}/>
               </button>
+              {!sidebarCollapsed && (
+                <div className="logo-area desktop-logo">
+                  <div className="logo-icon">
+                    <Zap size={22} color="white" fill="white" />
+                  </div>
+                  <span>Cabine 2.0</span>
+                </div>
+              )}
             </div>
 
             <nav className="nav-menu">
