@@ -4,7 +4,8 @@ import {
   History, Settings, LogOut, Globe, Zap, CheckCircle2, Clock,
   XCircle, RefreshCw, Menu, Delete, Printer, Share2, Lock,
   Radio, AlertTriangle, Info, X, Download, Send,
-  TrendingUp, TrendingDown, BarChart2, Star, Wifi
+  TrendingUp, TrendingDown, BarChart2, Star, Wifi,
+  ChevronLeft, ChevronRight
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import './App.css';
@@ -268,6 +269,15 @@ function App() {
   const [activeOperation, setActiveOperation] = useState('transfer');
   const [analytics, setAnalytics] = useState(null);
   const [selectedBundle, setSelectedBundle] = useState(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
+    localStorage.getItem('sidebar_collapsed') === 'true'
+  );
+
+  const toggleSidebar = () => {
+    const next = !sidebarCollapsed;
+    setSidebarCollapsed(next);
+    localStorage.setItem('sidebar_collapsed', String(next));
+  };
   const [contacts, setContacts] = useState(() => {
     try { return JSON.parse(localStorage.getItem('cabine_contacts') || '[]'); }
     catch { return []; }
@@ -1277,56 +1287,74 @@ function App() {
           </div>
 
           {/* Sidebar */}
-          <aside className={`sidebar ${mobileMenuOpen ? 'open' : ''}`}>
-            <div className="logo-area desktop-logo">
-              <div className="logo-icon">
-                <Zap size={24} color="white" fill="white" />
+          <aside className={`sidebar ${mobileMenuOpen ? 'open' : ''} ${sidebarCollapsed ? 'collapsed' : ''}`}>
+            <div className="sidebar-top">
+              <div className="logo-area desktop-logo">
+                <div className="logo-icon">
+                  <Zap size={24} color="white" fill="white" />
+                </div>
+                {!sidebarCollapsed && <span>Cabine 2.0</span>}
               </div>
-              <span>Cabine 2.0</span>
+              <button
+                className="sidebar-toggle-btn"
+                onClick={toggleSidebar}
+                title={sidebarCollapsed ? 'Déplier' : 'Réduire'}
+              >
+                {sidebarCollapsed ? <ChevronRight size={15}/> : <ChevronLeft size={15}/>}
+              </button>
             </div>
 
             <nav className="nav-menu">
-              <div className={`nav-item ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => { setActiveTab('dashboard'); setMobileMenuOpen(false); }}>
-                <LayoutDashboard size={20} />
-                <span>Tableau de bord</span>
-              </div>
-              <div className={`nav-item ${activeTab === 'transactions' ? 'active' : ''}`} onClick={() => { setActiveTab('transactions'); setMobileMenuOpen(false); }}>
-                <History size={20} />
-                <span>Historique (Ledger)</span>
-              </div>
-              <div className={`nav-item ${activeTab === 'analytics' ? 'active' : ''}`} onClick={() => { setActiveTab('analytics'); setMobileMenuOpen(false); }}>
-                <BarChart2 size={20} />
-                <span>Analytiques</span>
-              </div>
-              <div className={`nav-item ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => { setActiveTab('settings'); setMobileMenuOpen(false); }}>
-                <Settings size={20} />
-                <span>Paramètres</span>
-              </div>
+              {[
+                { id: 'dashboard',    icon: <LayoutDashboard size={20}/>, label: 'Tableau de bord' },
+                { id: 'transactions', icon: <History size={20}/>,         label: 'Historique' },
+                { id: 'analytics',    icon: <BarChart2 size={20}/>,       label: 'Analytiques' },
+                { id: 'settings',     icon: <Settings size={20}/>,        label: 'Paramètres' },
+              ].map(item => (
+                <div
+                  key={item.id}
+                  className={`nav-item ${activeTab === item.id ? 'active' : ''}`}
+                  onClick={() => { setActiveTab(item.id); setMobileMenuOpen(false); }}
+                  title={sidebarCollapsed ? item.label : ''}
+                >
+                  {item.icon}
+                  {!sidebarCollapsed && <span>{item.label}</span>}
+                </div>
+              ))}
             </nav>
 
-            <div className="agent-card">
-              <div className="avatar">{avatarInitials}</div>
-              <div className="agent-info">
-                <h4>{agentName}</h4>
-                <p>Agent Principal</p>
-              </div>
-              <div style={{display: 'flex', gap: '8px'}}>
-                <button 
-                  onClick={() => setDarkMode(!darkMode)}
-                  style={{
-                    padding: '4px',
-                    background: 'transparent',
-                    border: 'none',
-                    color: 'var(--text-muted)',
-                    cursor: 'pointer',
-                    borderRadius: '4px'
-                  }}
-                  title={darkMode ? 'Mode clair' : 'Mode sombre'}
-                >
-                  {darkMode ? '☀️' : '🌙'}
-                </button>
-                <LogOut size={18} color="#ef4444" style={{cursor: 'pointer'}} />
-              </div>
+            <div className={`agent-card ${sidebarCollapsed ? 'agent-card--mini' : ''}`}>
+              <div className="avatar" title={sidebarCollapsed ? agentName : ''}>{avatarInitials}</div>
+              {!sidebarCollapsed && (
+                <>
+                  <div className="agent-info">
+                    <h4>{agentName}</h4>
+                    <p>Agent Principal</p>
+                  </div>
+                  <div style={{display:'flex',gap:'8px',marginLeft:'auto'}}>
+                    <button
+                      onClick={() => setDarkMode(!darkMode)}
+                      style={{padding:'4px',background:'transparent',border:'none',color:'var(--text-muted)',cursor:'pointer',borderRadius:'4px'}}
+                      title={darkMode ? 'Mode clair' : 'Mode sombre'}
+                    >
+                      {darkMode ? '☀️' : '🌙'}
+                    </button>
+                    <LogOut size={18} color="#ef4444" style={{cursor:'pointer'}}/>
+                  </div>
+                </>
+              )}
+              {sidebarCollapsed && (
+                <div style={{display:'flex',flexDirection:'column',gap:'8px',alignItems:'center',width:'100%'}}>
+                  <button
+                    onClick={() => setDarkMode(!darkMode)}
+                    style={{padding:'4px',background:'transparent',border:'none',color:'var(--text-muted)',cursor:'pointer',borderRadius:'4px'}}
+                    title={darkMode ? 'Mode clair' : 'Mode sombre'}
+                  >
+                    {darkMode ? '☀️' : '🌙'}
+                  </button>
+                  <LogOut size={18} color="#ef4444" style={{cursor:'pointer'}} title="Déconnexion"/>
+                </div>
+              )}
             </div>
           </aside>
 
