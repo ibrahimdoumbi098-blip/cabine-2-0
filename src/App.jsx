@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   LayoutDashboard, ArrowUpRight, ArrowDownToLine, PhoneCall,
-  History, Settings, LogOut, Globe, Zap, CheckCircle2, Clock,
+  History, Settings, LogOut, Zap, CheckCircle2, Clock,
   XCircle, RefreshCw, Menu, Delete, Printer, Share2, Lock,
-  Radio, AlertTriangle, Info, X, Download, Send,
+  AlertTriangle, Info, X, Download, Send,
   TrendingUp, TrendingDown, BarChart2, Star, Wifi,
-  ChevronLeft, ChevronRight
+  ChevronLeft, ChevronRight, Copy, Ban
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import './App.css';
@@ -21,6 +21,15 @@ const OPERATOR_LOGOS = {
 };
 const OPERATOR_NAMES = { orange: 'Orange', mtn: 'MTN', wave: 'Wave', moov: 'Moov' };
 const OPERATOR_COLORS = { orange: '#ff6600', mtn: '#ffcc00', wave: '#1ba4e6', moov: '#F37021' };
+
+// === OPERATORS SUPPORTING EACH SERVICE ===
+// Wave is app-only — no airtime recharge or data bundle via agents
+const OPERATOR_CAPS = {
+  transfer: ['orange', 'mtn', 'wave', 'moov'],
+  withdraw: ['orange', 'mtn', 'wave', 'moov'],
+  airtime:  ['orange', 'mtn', 'moov'],
+  internet: ['orange', 'mtn', 'moov'],
+};
 
 // === INTERNET BUNDLES PER OPERATOR ===
 const INTERNET_BUNDLES = {
@@ -38,12 +47,7 @@ const INTERNET_BUNDLES = {
     { id: 'm-10g',  label: '10 Go',  price: 7500, validity: '30 jours', tag: 'Top valeur' },
     { id: 'm-20g',  label: '20 Go',  price: 13000, validity: '30 jours', tag: null },
   ],
-  wave: [
-    { id: 'w-500m', label: '500 Mo', price: 500, validity: '7 jours', tag: null },
-    { id: 'w-2g',   label: '2 Go',   price: 1500, validity: '30 jours', tag: 'Populaire' },
-    { id: 'w-5g',   label: '5 Go',   price: 3000, validity: '30 jours', tag: 'Top valeur' },
-    { id: 'w-10g',  label: '10 Go',  price: 5000, validity: '30 jours', tag: null },
-  ],
+  wave: [], // Wave ne propose pas de forfaits data via agents
   moov: [
     { id: 'mo-200m', label: '200 Mo', price: 300, validity: '24h', tag: null },
     { id: 'mo-1g',   label: '1 Go',   price: 900, validity: '30 jours', tag: 'Populaire' },
@@ -115,6 +119,14 @@ const OP_CONFIG = {
     txSign: '-', txColorVar: 'var(--accent-blue)',
   },
 };
+
+// === DYNAMIC GREETING ===
+function getGreeting() {
+  const h = new Date().getHours();
+  if (h < 12) return 'Bonjour';
+  if (h < 18) return 'Bon après-midi';
+  return 'Bonsoir';
+}
 
 // === AUTO-DETECT OPERATOR FROM PHONE NUMBER (Côte d'Ivoire) ===
 function detectOperator(phone) {
@@ -399,6 +411,8 @@ function App() {
           if (tx.status === 'SUCCESS') {
             setReceiptData(tx);
             pendingTxRef.current = null;
+            // Haptic feedback on mobile
+            if (navigator.vibrate) navigator.vibrate([50, 30, 50]);
             if (tx.type === 'RETRAIT') {
               addToast('success', 'Retrait réussi !', `+${fmtAmt} F encaissés depuis ${tx.phone}`);
             } else if (tx.type === 'AIRTIME') {
@@ -438,14 +452,21 @@ function App() {
   useEffect(() => {
     fetchData();
     fetchGpStatus();
-    const interval = setInterval(fetchData, 2000);
-    const gpInterval = setInterval(fetchGpStatus, 15000);
-    const goOffline = () => setIsOffline(true);
-    const goOnline = () => { setIsOffline(false); fetchData(); };
+    // Poll only when user is on dashboard or transactions (live data matters)
+    const shouldPoll = activeTab === 'dashboard' || activeTab === 'transactions';
+    const interval = shouldPoll ? setInterval(fetchData, 3000) : null;
+    const gpInterval = setInterval(fetchGpStatus, 20000);
+    const goOffline = () => { offlineCount.current = 10; setIsOffline(true); };
+    const goOnline = () => { offlineCount.current = 0; setIsOffline(false); fetchData(); };
     window.addEventListener('offline', goOffline);
     window.addEventListener('online', goOnline);
-    return () => { clearInterval(interval); clearInterval(gpInterval); window.removeEventListener('offline', goOffline); window.removeEventListener('online', goOnline); };
-  }, [transactionSearch, transactionStatus, transactionSince, transactionUntil]);
+    return () => {
+      if (interval) clearInterval(interval);
+      clearInterval(gpInterval);
+      window.removeEventListener('offline', goOffline);
+      window.removeEventListener('online', goOnline);
+    };
+  }, [transactionSearch, transactionStatus, transactionSince, transactionUntil, activeTab]);
 
   const initiateTransfer = (e) => {
     e.preventDefault();
@@ -488,16 +509,19 @@ function App() {
     const numAmount = activeOperation === 'internet'
       ? selectedBundle.price
       : parseInt(amount, 10);
+    // Capture before reset
+    const capturedPhone = phone;
+    const capturedBundle = selectedBundle;
 
     try {
       const body = {
         provider: selectedProvider,
-        phone,
+        phone: capturedPhone,
         amount: numAmount,
         pin: enteredPin,
       };
-      if (activeOperation === 'internet' && selectedBundle) {
-        body.bundle = selectedBundle;
+      if (activeOperation === 'internet' && capturedBundle) {
+        body.bundle = capturedBundle;
       }
 
       const response = await fetch(cfg.endpoint, {
@@ -513,15 +537,16 @@ function App() {
         setAmount('');
         setPhone('');
         setSelectedBundle(null);
+        setPinCode('');
         setShowPinModal(false);
         fetchData();
         const fmtAmt = new Intl.NumberFormat('fr-FR').format(numAmount);
         if (activeOperation === 'withdraw') {
           addToast('info', 'Retrait initié', `Encaissement de ${fmtAmt} FCFA en cours...`);
         } else if (activeOperation === 'airtime') {
-          addToast('info', 'Recharge en cours', `${fmtAmt} FCFA de crédit envoyé sur ${phone}...`);
+          addToast('info', 'Recharge en cours', `${fmtAmt} FCFA de crédit vers ${capturedPhone}...`);
         } else if (activeOperation === 'internet') {
-          addToast('info', 'Forfait en cours d\'activation', `${selectedBundle?.label} en cours sur ${phone}...`);
+          addToast('info', 'Activation en cours', `${capturedBundle?.label} en cours sur ${capturedPhone}...`);
         } else {
           addToast('info', 'Transaction initiée', `Traitement via GeniusPay ${result.mode === 'sandbox' ? '(Sandbox)' : ''}...`);
         }
@@ -606,6 +631,14 @@ function App() {
     }
   };
 
+  const copyToClipboard = (text, label = 'Référence') => {
+    navigator.clipboard?.writeText(text).then(() => {
+      addToast('success', 'Copié !', `${label} copiée dans le presse-papier.`);
+    }).catch(() => {
+      addToast('info', 'Non supporté', 'La copie automatique n\'est pas disponible.');
+    });
+  };
+
   const getProviderIcon = (provider) => {
     return <img src={OPERATOR_LOGOS[provider]} alt={OPERATOR_NAMES[provider]} style={{width: 34, height: 34, borderRadius: 8, objectFit: 'contain'}} />;
   };
@@ -655,7 +688,7 @@ function App() {
     <>
       <div className="dashboard-header animate-in">
         <div className="header-title">
-          <h1>Bonjour, {agentName.split(' ')[0]} 👋</h1>
+          <h1>{getGreeting()}, {agentName.split(' ')[0]} 👋</h1>
           <p>Prêt à traiter les transactions d'aujourd'hui ?</p>
           <div className="gp-badge">
             <span className={`gp-dot ${gpStatus.connected ? 'on' : gpStatus.hasKeys ? 'warn' : 'off'}`}/>
@@ -694,7 +727,13 @@ function App() {
         <div className="analytics-card">
           <div className="analytics-icon">⚡</div>
           <div className="analytics-content">
-            <h3>{Math.round(transactions.filter(t => t.status === 'SUCCESS').reduce((sum, t) => sum + t.amount, 0) / Math.max(transactions.filter(t => t.status === 'SUCCESS').length, 1)) || 0}</h3>
+            {(() => {
+              const successTx = transactions.filter(t => t.status === 'SUCCESS');
+              const avg = successTx.length > 0
+                ? Math.round(successTx.reduce((s,t) => s + t.amount, 0) / successTx.length)
+                : null;
+              return <h3>{avg !== null ? new Intl.NumberFormat('fr-FR').format(avg) : '—'}</h3>;
+            })()}
             <p>Montant moyen</p>
           </div>
         </div>
@@ -754,16 +793,29 @@ function App() {
               <div className="form-group">
                 <label>Réseau {activeOperation === 'internet' ? 'mobile' : 'de destination'}</label>
                 <div className="provider-grid">
-                  {['orange', 'mtn', 'wave', 'moov'].map(p => (
-                    <div key={p}
-                      className={`provider-btn ${p} ${selectedProvider === p ? 'selected' : ''}`}
-                      onClick={() => { setSelectedProvider(p); setSelectedBundle(null); }}
-                    >
-                      <img src={OPERATOR_LOGOS[p]} alt={OPERATOR_NAMES[p]} className="provider-logo-img" />
-                      {OPERATOR_NAMES[p]}
-                      {detectedOp === p && <span className={`detected-badge ${p}`}>Détecté</span>}
-                    </div>
-                  ))}
+                  {['orange', 'mtn', 'wave', 'moov'].map(p => {
+                    const supported = OPERATOR_CAPS[activeOperation]?.includes(p) ?? true;
+                    const isSelected = selectedProvider === p;
+                    return (
+                      <div key={p}
+                        className={`provider-btn ${p} ${isSelected ? 'selected' : ''} ${!supported ? 'unavailable' : ''}`}
+                        onClick={() => {
+                          if (!supported) {
+                            addToast('warning', `${OPERATOR_NAMES[p]} non compatible`,
+                              `${OPERATOR_NAMES[p]} ne propose pas ce service via agent.`);
+                            return;
+                          }
+                          setSelectedProvider(p);
+                          setSelectedBundle(null);
+                        }}
+                      >
+                        <img src={OPERATOR_LOGOS[p]} alt={OPERATOR_NAMES[p]} className="provider-logo-img" />
+                        {OPERATOR_NAMES[p]}
+                        {!supported && <span className="unavailable-badge"><Ban size={10}/> N/D</span>}
+                        {supported && detectedOp === p && <span className={`detected-badge ${p}`}>Détecté</span>}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -910,11 +962,10 @@ function App() {
                 ))
               )}
             </div>
-            {transactions.length > 5 && (
-              <button className="view-all-btn" onClick={() => setActiveTab('transactions')}>
-                Voir tout l'historique
-              </button>
-            )}
+            <button className="view-all-btn" onClick={() => setActiveTab('transactions')}>
+              Voir tout l'historique
+              {transactions.length > 0 && <span className="view-all-count">{transactions.length}</span>}
+            </button>
           </div>
         </div>
       </div>
@@ -960,6 +1011,14 @@ function App() {
               <label>Date fin</label>
               <input type="date" value={transactionUntil} onChange={(e) => setTransactionUntil(e.target.value)} />
             </div>
+            {(transactionSearch || transactionStatus !== 'all' || transactionSince || transactionUntil) && (
+              <button className="reset-filters-btn" onClick={() => {
+                setTransactionSearch(''); setTransactionStatus('all');
+                setTransactionSince(''); setTransactionUntil('');
+              }}>
+                <X size={13}/> Réinitialiser
+              </button>
+            )}
             <button className="export-btn" onClick={downloadTransactionsCsv}>
               <Download size={14} style={{marginRight: '6px'}} /> Exporter CSV
             </button>
@@ -982,7 +1041,18 @@ function App() {
                         {OPERATOR_NAMES[tx.provider] || tx.provider}
                         <span style={{fontSize:'11px', color:'var(--text-muted)', fontWeight:'normal', marginLeft:'6px'}}>{new Date(tx.created_at).toLocaleString('fr-FR')}</span>
                       </p>
-                      <span>{tx.phone} • TX-{tx.id.toString().padStart(6, '0')}{tx.geniuspay_ref ? ` • ${tx.geniuspay_ref}` : ''}</span>
+                      <span>
+                        {tx.phone}
+                        {' • '}
+                        <span
+                          className="tx-ref-copy"
+                          onClick={() => copyToClipboard(`TX-${tx.id.toString().padStart(6,'0')}`, 'Référence')}
+                          title="Copier la référence"
+                        >
+                          TX-{tx.id.toString().padStart(6,'0')} <Copy size={10}/>
+                        </span>
+                        {tx.geniuspay_ref && <> • <span className="tx-ref-copy" onClick={() => copyToClipboard(tx.geniuspay_ref, 'Réf. GeniusPay')} title="Copier réf. GeniusPay">{tx.geniuspay_ref} <Copy size={10}/></span></>}
+                      </span>
                     </div>
                   </div>
                   <div className="tx-actions-row">
@@ -1314,7 +1384,7 @@ function App() {
             <nav className="nav-menu">
               {[
                 { id: 'dashboard',    icon: <LayoutDashboard size={20}/>, label: 'Tableau de bord' },
-                { id: 'transactions', icon: <History size={20}/>,         label: 'Historique' },
+                { id: 'transactions', icon: <History size={20}/>,         label: 'Transactions' },
                 { id: 'analytics',    icon: <BarChart2 size={20}/>,       label: 'Analytiques' },
                 { id: 'settings',     icon: <Settings size={20}/>,        label: 'Paramètres' },
               ].map(item => (
@@ -1365,8 +1435,8 @@ function App() {
             </div>
           </aside>
 
-          {/* Connecting banner — soft yellow, shown 2-7 failures (4-14s) */}
-          {!isOffline && offlineCount.current >= 2 && (
+          {/* Connecting banner — soft yellow, shown 2-7 failures */}
+          {!isOffline && !isLoading && offlineCount.current >= 2 && (
             <div className="connecting-banner">
               <RefreshCw size={14} style={{animation:'spin 1s linear infinite'}}/> Connexion au serveur en cours...
             </div>
