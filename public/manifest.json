@@ -1,0 +1,19 @@
+{
+  "name": "Cabine 2.0 — Le Super Agrégateur",
+  "short_name": "Cabine 2.0",
+  "description": "Plateforme de transfert inter-réseaux mobile money en Côte d'Ivoire. Orange, MTN, Wave, Moov.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f5f6fa",
+  "theme_color": "#6366f1",
+  "categories": ["finance", "utilities"],
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,13 +1,42 @@
+databases:
+  - name: cabine-2-0-db
+    databaseName: cabine20
+    user: cabine
+    plan: free
+
 services:
   - type: web
     name: cabine-2-0
     env: node
+    plan: free
     buildCommand: npm install && npm run build
     startCommand: npm start
+    healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
         value: production
+      - key: PORT
+        value: "3000"
+
+      # === GeniusPay — Sandbox ===
+      # Remplacer par les clés Live lors du passage en production
+      - key: GENIUSPAY_MODE
+        value: sandbox
+      - key: GENIUSPAY_PK
+        value: pk_sandbox_Xrx7GbI3NrGJ3QpzxUlTAI2ajyHYYEy4
+      - key: GENIUSPAY_SK
+        value: sk_sandbox_f447a9829276d0873e34b692d84f3b4c39f7319f9169d742da72e33e21a2cb89
       - key: GENIUSPAY_API_KEY
-        value: "sk_test_geniuspay_YOUR_KEY_HERE"
-      - key: GENIUSPAY_API_URL
-        value: "https://api.genius.ci/v1"
+        value: priv_xZZ98TTeDBDdOqeYsRF0fzX0cUkW
+      - key: GENIUSPAY_MERCHANT_ID
+        value: "GPAY-B3I4"
+      - key: GENIUSPAY_WALLET_ID
+        value: ""
+      - key: GENIUSPAY_WEBHOOK_SECRET
+        value: ""
+
+      # === Base de données PostgreSQL (auto-liée) ===
+      - key: DATABASE_URL
+        fromDatabase:
+          name: cabine-2-0-db
+          property: connectionString

@@ -1,28 +1,158 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { 
-  LayoutDashboard, 
-  Send, 
-  Download, 
-  PhoneCall, 
-  History, 
-  Settings, 
-  LogOut,
-  Smartphone,
-  Wifi,
-  Zap,
-  CheckCircle2,
-  Clock,
-  XCircle,
-  RefreshCw,
-  Menu,
-  Delete,
-  Printer,
-  Share2
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  LayoutDashboard, ArrowUpRight, ArrowDownToLine, PhoneCall,
+  History, Settings, LogOut, Globe, Zap, CheckCircle2, Clock,
+  XCircle, RefreshCw, Menu, Delete, Printer, Share2, Lock,
+  Radio, AlertTriangle, Info, X, Download, Send,
+  TrendingUp, TrendingDown, BarChart2, Star
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import './App.css';
 
 const API_URL = '/api';
+
+// === REAL OPERATOR LOGOS (static files) ===
+const OPERATOR_LOGOS = {
+  orange: '/logos/orange.svg',
+  mtn: '/logos/mtn.svg',
+  wave: '/logos/wave.svg',
+  moov: '/logos/moov.svg',
+};
+const OPERATOR_NAMES = { orange: 'Orange', mtn: 'MTN', wave: 'Wave', moov: 'Moov' };
+const OPERATOR_COLORS = { orange: '#ff6600', mtn: '#ffcc00', wave: '#1ba4e6', moov: '#F37021' };
+
+// === AUTO-DETECT OPERATOR FROM PHONE NUMBER (Côte d'Ivoire) ===
+function detectOperator(phone) {
+  const cleaned = phone.replace(/[\s\-\.\+]/g, '');
+  let digits = cleaned;
+  if (digits.startsWith('225')) digits = digits.substring(3);
+  if (digits.startsWith('0')) digits = digits.substring(1);
+  if (digits.length < 2) return null;
+  const prefix = digits.substring(0, 2);
+  // Orange CI: 07, 08, 27
+  if (['07', '08', '27'].includes(prefix)) return 'orange';
+  // MTN CI: 05, 06, 25, 26
+  if (['05', '06', '25', '26'].includes(prefix)) return 'mtn';
+  // Moov CI: 01, 02, 03
+  if (['01', '02', '03'].includes(prefix)) return 'moov';
+  // Wave: no specific prefix, app-based
+  return null;
+}
+
+// === TOAST NOTIFICATION SYSTEM ===
+function ToastContainer({ toasts, onDismiss }) {
+  return (
+    <div className="toast-container">
+      {toasts.map(t => (
+        <div key={t.id} className={`toast toast-${t.type}`}>
+          <div className="toast-icon">
+            {t.type === 'success' && <CheckCircle2 size={18} />}
+            {t.type === 'error' && <XCircle size={18} />}
+            {t.type === 'info' && <Info size={18} />}
+            {t.type === 'warning' && <AlertTriangle size={18} />}
+          </div>
+          <div className="toast-content">
+            <strong>{t.title}</strong>
+            <p>{t.message}</p>
+          </div>
+          <button className="toast-close" onClick={() => onDismiss(t.id)}><X size={14} /></button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// === CHART COMPONENTS ===
+function BarChart({ data }) {
+  if (!data?.length || data.every(d => d.value === 0)) {
+    return <div className="chart-empty">Aucune donnée pour la période</div>;
+  }
+  const maxVal = Math.max(...data.map(d => d.value), 1);
+  const n = data.length;
+  const bw = (100 / n) * 0.65;
+  const bg = (100 / n) * 0.175;
+  return (
+    <div className="bar-chart-wrap">
+      <svg viewBox="0 0 100 80" className="bar-chart-svg" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="barGrad1" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#6366f1"/>
+            <stop offset="100%" stopColor="#8b5cf6" stopOpacity="0.4"/>
+          </linearGradient>
+        </defs>
+        <line x1="0" y1="75" x2="100" y2="75" stroke="var(--border-color)" strokeWidth="0.5"/>
+        {data.map((d, i) => {
+          const h = Math.max((d.value / maxVal) * 68, d.value > 0 ? 3 : 0);
+          const x = i * (100 / n) + bg;
+          return <rect key={i} x={x} y={75 - h} width={bw} height={h} fill="url(#barGrad1)" rx="2"/>;
+        })}
+      </svg>
+      <div className="bar-chart-labels">
+        {data.map((d, i) => <div key={i} className="bar-label-item">{d.label}</div>)}
+      </div>
+    </div>
+  );
+}
+
+function DonutChart({ slices }) {
+  const nonZero = slices.filter(s => s.value > 0);
+  const total = nonZero.reduce((s, d) => s + d.value, 0);
+  if (total === 0) {
+    return (
+      <div className="donut-wrap">
+        <div className="chart-empty" style={{width: 120, height: 120}}>—</div>
+      </div>
+    );
+  }
+  const cx = 60, cy = 60, outerR = 50, innerR = 30;
+  let ang = -Math.PI / 2;
+  const arcs = nonZero.map(slice => {
+    const a = (slice.value / total) * 2 * Math.PI;
+    const sa = ang; ang += a; const ea = ang;
+    const x1 = cx + outerR * Math.cos(sa), y1 = cy + outerR * Math.sin(sa);
+    const x2 = cx + outerR * Math.cos(ea), y2 = cy + outerR * Math.sin(ea);
+    const ix1 = cx + innerR * Math.cos(sa), iy1 = cy + innerR * Math.sin(sa);
+    const ix2 = cx + innerR * Math.cos(ea), iy2 = cy + innerR * Math.sin(ea);
+    const laf = a > Math.PI ? 1 : 0;
+    const d = `M${ix1} ${iy1} L${x1} ${y1} A${outerR} ${outerR} 0 ${laf} 1 ${x2} ${y2} L${ix2} ${iy2} A${innerR} ${innerR} 0 ${laf} 0 ${ix1} ${iy1}Z`;
+    return { d, color: slice.color };
+  });
+  const fmt = v => new Intl.NumberFormat('fr-FR', {notation:'compact', maximumFractionDigits:0}).format(v);
+  return (
+    <div className="donut-wrap">
+      <svg viewBox="0 0 120 120" width="120" height="120">
+        {arcs.map((arc, i) => <path key={i} d={arc.d} fill={arc.color}/>)}
+        <text x={cx} y={cy-5} textAnchor="middle" style={{fontSize:'7px',fill:'var(--text-muted)'}}>Volume</text>
+        <text x={cx} y={cy+8} textAnchor="middle" style={{fontSize:'10px',fontWeight:700,fill:'var(--text-dark)'}}>
+          {fmt(total)}
+        </text>
+        <text x={cx} y={cy+20} textAnchor="middle" style={{fontSize:'7px',fill:'var(--text-muted)'}}>FCFA</text>
+      </svg>
+    </div>
+  );
+}
+
+function HourlyHeatmap({ hourly }) {
+  const currentHour = new Date().getHours();
+  const maxVal = Math.max(...hourly.map(h => parseInt(h.total) || 0), 1);
+  const cells = Array.from({length: 24}, (_, i) => {
+    const found = hourly.find(h => parseInt(h.hour) === i);
+    return { hour: i, total: found ? (parseInt(found.total) || 0) : 0 };
+  });
+  return (
+    <div className="hourly-heatmap">
+      {cells.map(c => (
+        <div key={c.hour}
+          className={`hour-cell${c.total > 0 ? ' active' : ''}${c.hour === currentHour ? ' current' : ''}`}
+          style={{'--intensity': c.total > 0 ? c.total / maxVal : 0}}
+          title={`${c.hour}h00 : ${c.total} transaction${c.total !== 1 ? 's' : ''}`}
+        >
+          <span className="hour-label">{c.hour}h</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -32,17 +162,110 @@ function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [balance, setBalance] = useState(0);
   const [transactions, setTransactions] = useState([]);
+  const [transactionSearch, setTransactionSearch] = useState('');
+  const [transactionStatus, setTransactionStatus] = useState('all');
+  const [transactionSince, setTransactionSince] = useState('');
+  const [transactionUntil, setTransactionUntil] = useState('');
   const [agentName, setAgentName] = useState('Chargement...');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [darkMode, setDarkMode] = useState(false);
+  const [activeOperation, setActiveOperation] = useState('transfer');
+  const [analytics, setAnalytics] = useState(null);
+  const [contacts, setContacts] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('cabine_contacts') || '[]'); }
+    catch { return []; }
+  });
+
+  // GeniusPay Status
+  const [gpStatus, setGpStatus] = useState({ connected: false, mode: 'sandbox', hasKeys: false });
+
+  const avatarInitials = agentName
+    .split(' ')
+    .filter(Boolean)
+    .map((word) => word[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase() || 'AG';
+
+  // Toast Notifications
+  const [toasts, setToasts] = useState([]);
+  const toastId = useRef(0);
 
   // Security States
   const [showPinModal, setShowPinModal] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [pinCode, setPinCode] = useState('');
+  
+  // Settings PIN States
+  const [oldPin, setOldPin] = useState('');
+  const [newPin, setNewPin] = useState('');
+  const [pinUpdateMessage, setPinUpdateMessage] = useState('');
 
   // Receipt States
   const [receiptData, setReceiptData] = useState(null);
   const pendingTxRef = useRef(null);
   const receiptRef = useRef(null);
+
+  // Apply dark mode
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
+  }, [darkMode]);
+
+  // Phone number formatting helper
+  const formatPhoneDisplay = (value) => {
+    const digits = value.replace(/\D/g, '');
+    const parts = [];
+    for (let i = 0; i < digits.length && i < 10; i += 2) {
+      parts.push(digits.substring(i, i + 2));
+    }
+    return parts.join(' ');
+  };
+
+  const handlePhoneChange = (e) => {
+    const raw = e.target.value.replace(/\D/g, '').substring(0, 10);
+    const formatted = formatPhoneDisplay(raw);
+    setPhone(formatted);
+    const op = detectOperator(raw);
+    if (op) setSelectedProvider(op);
+  };
+
+  const addToast = useCallback((type, title, message) => {
+    const id = ++toastId.current;
+    setToasts(prev => [...prev, { id, type, title, message }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 5000);
+  }, []);
+
+  const dismissToast = useCallback((id) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
+
+  const fetchGpStatus = async () => {
+    try {
+      const res = await fetch(`${API_URL}/geniuspay/status`);
+      const data = await res.json();
+      setGpStatus(data);
+    } catch (e) { /* silent */ }
+  };
+
+  const fetchAnalytics = async () => {
+    try {
+      const res = await fetch(`${API_URL}/analytics`);
+      const data = await res.json();
+      setAnalytics(data);
+    } catch (e) { /* silent */ }
+  };
+
+  const saveContact = () => {
+    const raw = phone.replace(/\s/g, '');
+    if (!raw || raw.length < 8) return;
+    const newContact = { phone: raw, operator: selectedProvider };
+    const updated = [newContact, ...contacts.filter(c => c.phone !== raw)].slice(0, 8);
+    setContacts(updated);
+    localStorage.setItem('cabine_contacts', JSON.stringify(updated));
+    addToast('success', 'Contact sauvegardé', `${formatPhoneDisplay(raw)} ajouté aux favoris.`);
+  };
 
   const fetchData = async () => {
     try {
@@ -50,39 +273,71 @@ function App() {
       const walletData = await walletRes.json();
       setBalance(walletData.balance);
       setAgentName(walletData.agent_name);
+      setIsOffline(false);
 
-      const txRes = await fetch(`${API_URL}/transactions`);
+      const queryParams = new URLSearchParams({ limit: '50' });
+      if (transactionStatus && transactionStatus !== 'all') queryParams.set('status', transactionStatus);
+      if (transactionSearch) queryParams.set('q', transactionSearch);
+      if (transactionSince) queryParams.set('since', transactionSince);
+      if (transactionUntil) queryParams.set('until', transactionUntil);
+
+      const txRes = await fetch(`${API_URL}/transactions?${queryParams.toString()}`);
       const txData = await txRes.json();
       setTransactions(txData);
 
-      // Check if a pending transaction has resolved
       if (pendingTxRef.current) {
         const tx = txData.find(t => t.id === pendingTxRef.current);
         if (tx) {
           if (tx.status === 'SUCCESS') {
-            setReceiptData(tx); // Trigger receipt modal
+            setReceiptData(tx);
             pendingTxRef.current = null;
+            if (tx.type === 'RETRAIT') {
+              addToast('success', 'Retrait réussi', `+${new Intl.NumberFormat('fr-FR').format(tx.amount)} F encaissés depuis ${tx.phone}`);
+            } else {
+              addToast('success', 'Transaction réussie', `${new Intl.NumberFormat('fr-FR').format(tx.amount)} F envoyés à ${tx.phone}`);
+            }
           } else if (tx.status === 'FAILED') {
-            alert(`La transaction de ${tx.amount} F vers ${tx.phone} a échoué. Le solde a été recrédité.`);
+            if (tx.type === 'RETRAIT') {
+              addToast('error', 'Retrait échoué', `Le client n'a pas pu envoyer les fonds. Solde non débité.`);
+            } else {
+              addToast('error', 'Transaction échouée', `${new Intl.NumberFormat('fr-FR').format(tx.amount)} F vers ${tx.phone} — Solde recrédité.`);
+            }
             pendingTxRef.current = null;
           }
         }
       }
-
+      setIsLoading(false);
     } catch (error) {
+      setIsOffline(true);
+      setIsLoading(false);
       console.error("Erreur de connexion au backend", error);
     }
   };
 
   useEffect(() => {
+    if (activeTab === 'analytics') fetchAnalytics();
+  }, [activeTab]);
+
+  useEffect(() => {
     fetchData();
+    fetchGpStatus();
     const interval = setInterval(fetchData, 2000);
-    return () => clearInterval(interval);
-  }, []);
+    const gpInterval = setInterval(fetchGpStatus, 15000);
+    const goOffline = () => setIsOffline(true);
+    const goOnline = () => { setIsOffline(false); fetchData(); };
+    window.addEventListener('offline', goOffline);
+    window.addEventListener('online', goOnline);
+    return () => { clearInterval(interval); clearInterval(gpInterval); window.removeEventListener('offline', goOffline); window.removeEventListener('online', goOnline); };
+  }, [transactionSearch, transactionStatus, transactionSince, transactionUntil]);
 
   const initiateTransfer = (e) => {
     e.preventDefault();
     if (!amount || !phone) return;
+    setShowConfirmModal(true);
+  };
+
+  const confirmAndShowPin = () => {
+    setShowConfirmModal(false);
     setPinCode('');
     setShowPinModal(true);
   };
@@ -104,9 +359,11 @@ function App() {
 
   const executeTransfer = async (enteredPin) => {
     setIsProcessing(true);
-    
+    const isRetrait = activeOperation === 'withdraw';
+    const endpoint = isRetrait ? `${API_URL}/retrait` : `${API_URL}/transfer`;
+
     try {
-      const response = await fetch(`${API_URL}/transfer`, {
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -118,26 +375,55 @@ function App() {
       });
 
       const result = await response.json();
-      
+
       if (response.ok) {
-        pendingTxRef.current = result.txId; // Track this transaction
+        pendingTxRef.current = result.txId;
         setAmount('');
         setPhone('');
         setShowPinModal(false);
-        fetchData(); 
-        
-        if(window.innerWidth < 768) {
-           window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+        fetchData();
+        if (isRetrait) {
+          addToast('info', 'Retrait initié', `Encaissement de ${new Intl.NumberFormat('fr-FR').format(parseInt(amount))} FCFA en cours...`);
+        } else {
+          addToast('info', 'Transaction initiée', `Traitement via GeniusPay ${result.mode === 'sandbox' ? '(Sandbox)' : ''}...`);
+        }
+        if (window.innerWidth < 768) {
+          window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
         }
       } else {
-        alert("Erreur: " + result.error);
-        setPinCode(''); 
+        addToast('error', 'Erreur', result.error);
+        setPinCode('');
       }
     } catch (error) {
-      alert("Erreur de connexion au serveur.");
+      addToast('error', 'Erreur réseau', 'Impossible de joindre le serveur.');
       setPinCode('');
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const handleUpdatePin = async (e) => {
+    e.preventDefault();
+    setPinUpdateMessage('Mise à jour en cours...');
+    
+    try {
+      const response = await fetch(`${API_URL}/wallet/pin`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ oldPin, newPin }),
+      });
+
+      const result = await response.json();
+      if (response.ok) {
+        setPinUpdateMessage('✅ Code PIN mis à jour avec succès.');
+        setOldPin('');
+        setNewPin('');
+        setTimeout(() => setPinUpdateMessage(''), 3000);
+      } else {
+        setPinUpdateMessage(`❌ Erreur: ${result.error}`);
+      }
+    } catch (err) {
+      setPinUpdateMessage("❌ Erreur de connexion au serveur.");
     }
   };
 
@@ -156,20 +442,65 @@ function App() {
     }
   };
 
-  const getProviderIcon = (provider) => {
-    switch(provider) {
-      case 'orange': return <Zap size={18} />;
-      case 'wave': return <Zap size={18} />;
-      case 'mtn': return <Download size={18} />;
-      case 'moov': return <Wifi size={18} />;
-      default: return <Smartphone size={18} />;
+  const shareReceipt = async () => {
+    if (receiptRef.current) {
+      try {
+        const canvas = await html2canvas(receiptRef.current, { backgroundColor: '#ffffff' });
+        canvas.toBlob(async (blob) => {
+          if (navigator.share && blob) {
+            const file = new File([blob], `Recu_Cabine_TX_${receiptData.id}.png`, { type: blob.type });
+            try {
+              await navigator.share({
+                title: 'Reçu de Transaction Cabine 2.0',
+                text: `Reçu pour la transaction de ${receiptData.amount} FCFA vers ${receiptData.phone}.`,
+                files: [file],
+              });
+            } catch (error) {
+              console.log("Partage annulé ou échoué", error);
+            }
+          } else {
+            alert("Le partage natif n'est pas supporté sur cet appareil.");
+          }
+        }, "image/png");
+      } catch (err) {
+        console.error("Erreur lors de la préparation du partage", err);
+      }
     }
+  };
+
+  const getProviderIcon = (provider) => {
+    return <img src={OPERATOR_LOGOS[provider]} alt={OPERATOR_NAMES[provider]} style={{width: 34, height: 34, borderRadius: 8, objectFit: 'contain'}} />;
+  };
+
+  const downloadTransactionsCsv = () => {
+    const header = ['Date', 'Référence', 'Type', 'Opérateur', 'Téléphone', 'Montant', 'Statut', 'Ref GeniusPay'];
+    const rows = transactions.map(tx => ([
+      new Date(tx.created_at).toLocaleString('fr-FR'),
+      `TX-${tx.id.toString().padStart(6, '0')}`,
+      tx.type || 'TRANSFER',
+      OPERATOR_NAMES[tx.provider] || tx.provider,
+      tx.phone,
+      tx.type === 'RETRAIT' ? `+${tx.amount}` : `-${tx.amount}`,
+      tx.status,
+      tx.geniuspay_ref || ''
+    ]));
+
+    const csvLines = [header, ...rows].map(line => line.map(value => `"${String(value).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csvLines], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.setAttribute('download', 'transactions-cabine-2-0.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const getStatusBadge = (status) => {
     switch(status) {
       case 'SUCCESS':
         return <div className="tx-status success"><CheckCircle2 size={10} style={{marginRight: '4px', verticalAlign: 'middle'}}/> Succès</div>;
+      case 'PROCESSING':
+        return <div className="tx-status processing"><RefreshCw size={10} style={{marginRight: '4px', verticalAlign: 'middle', animation: 'spin 1s linear infinite'}}/> GeniusPay...</div>;
       case 'PENDING':
         return <div className="tx-status pending"><Clock size={10} style={{marginRight: '4px', verticalAlign: 'middle'}}/> En cours</div>;
       case 'FAILED':
@@ -179,298 +510,831 @@ function App() {
     }
   };
 
-  return (
-    <div className="app-container">
-      {/* Mobile Header */}
-      <div className="mobile-header">
-        <div className="logo-area">
-          <div className="logo-icon">
-            <Zap size={20} color="white" fill="white" />
+  // VIEWS
+  const detectedOp = detectOperator(phone);
+
+  const renderDashboard = () => (
+    <>
+      <div className="dashboard-header animate-in">
+        <div className="header-title">
+          <h1>Bonjour, {agentName.split(' ')[0]} 👋</h1>
+          <p>Prêt à traiter les transactions d'aujourd'hui ?</p>
+          <div className="gp-badge">
+            <span className={`gp-dot ${gpStatus.connected ? 'on' : 'off'}`}/>
+            {gpStatus.connected ? 'Connecté' : 'Hors ligne'}
           </div>
-          <span>Cabine 2.0</span>
         </div>
-        <button className="menu-toggle" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>
-          <Menu size={24} color="white" />
-        </button>
+        <div className="master-balance">
+          <div className="label">Solde Flotte</div>
+          <div className="amount">
+            {new Intl.NumberFormat('fr-FR').format(balance)}
+            <span className="currency-label">FCFA</span>
+          </div>
+        </div>
       </div>
 
-      {/* Sidebar */}
-      <aside className={`sidebar ${mobileMenuOpen ? 'open' : ''}`}>
-        <div className="logo-area desktop-logo">
-          <div className="logo-icon">
-            <Zap size={24} color="white" fill="white" />
-          </div>
-          <span>Cabine 2.0</span>
-        </div>
-
-        <nav className="nav-menu">
-          <div className={`nav-item ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => { setActiveTab('dashboard'); setMobileMenuOpen(false); }}>
-            <LayoutDashboard size={20} />
-            <span>Tableau de bord</span>
-          </div>
-          <div className={`nav-item ${activeTab === 'transactions' ? 'active' : ''}`} onClick={() => { setActiveTab('transactions'); setMobileMenuOpen(false); }}>
-            <History size={20} />
-            <span>Historique (Ledger)</span>
-          </div>
-          <div className="nav-item" onClick={() => setMobileMenuOpen(false)}>
-            <Settings size={20} />
-            <span>Paramètres</span>
-          </div>
-        </nav>
-
-        <div className="agent-card">
-          <div className="avatar">KB</div>
-          <div className="agent-info">
-            <h4>{agentName}</h4>
-            <p>Agent Principal - Cocody</p>
-          </div>
-          <LogOut size={18} color="#ef4444" style={{marginLeft: 'auto', cursor: 'pointer'}} />
-        </div>
-      </aside>
-
-      {/* Main Content */}
-      <main className="main-content" onClick={() => mobileMenuOpen && setMobileMenuOpen(false)}>
-        <div className="dashboard-header animate-slide-up">
-          <div className="header-title">
-            <h1>Bonjour, {agentName.split(' ')[0]} 👋</h1>
-            <p>Prêt à traiter les transactions d'aujourd'hui ?</p>
-          </div>
-          <div className="master-balance glass-panel">
-            <div className="label">Solde Flotte Global</div>
-            <div className="amount">
-              {new Intl.NumberFormat('fr-FR').format(balance)} 
-              <span className="currency-label">XOF</span>
-            </div>
+      {/* Analytics Cards */}
+      <div className="analytics-grid animate-in" style={{animationDelay: '0.02s'}}>
+        <div className="analytics-card">
+          <div className="analytics-icon">📊</div>
+          <div className="analytics-content">
+            <h3>{transactions.filter(t => t.status === 'SUCCESS').length}</h3>
+            <p>Transactions réussies</p>
           </div>
         </div>
-
-        <div className="action-grid animate-slide-up" style={{animationDelay: '0.1s'}}>
-          <div className="action-card glass-panel transfer">
-            <div className="action-icon"><Send size={24} /></div>
-            <span>Transfert</span>
-          </div>
-          <div className="action-card glass-panel withdraw">
-            <div className="action-icon"><Download size={24} /></div>
-            <span>Retrait</span>
-          </div>
-          <div className="action-card glass-panel airtime">
-            <div className="action-icon"><PhoneCall size={24} /></div>
-            <span>Crédit</span>
-          </div>
-          <div className="action-card glass-panel deposit">
-            <div className="action-icon"><Wifi size={24} /></div>
-            <span>Internet</span>
+        <div className="analytics-card">
+          <div className="analytics-icon">💰</div>
+          <div className="analytics-content">
+            <h3>{new Intl.NumberFormat('fr-FR').format(transactions.filter(t => t.status === 'SUCCESS').reduce((sum, t) => sum + t.amount, 0))}</h3>
+            <p>Volume total (FCFA)</p>
           </div>
         </div>
+        <div className="analytics-card">
+          <div className="analytics-icon">⚡</div>
+          <div className="analytics-content">
+            <h3>{Math.round(transactions.filter(t => t.status === 'SUCCESS').reduce((sum, t) => sum + t.amount, 0) / Math.max(transactions.filter(t => t.status === 'SUCCESS').length, 1)) || 0}</h3>
+            <p>Montant moyen</p>
+          </div>
+        </div>
+        <div className="analytics-card">
+          <div className="analytics-icon">🎯</div>
+          <div className="analytics-content">
+            <h3>{Math.round((transactions.filter(t => t.status === 'SUCCESS').length / Math.max(transactions.length, 1)) * 100) || 0}%</h3>
+            <p>Taux de succès</p>
+          </div>
+        </div>
+      </div>
 
-        <div className="working-area animate-slide-up" style={{animationDelay: '0.2s'}}>
-          {/* Operation Panel */}
-          <div className="glass-panel operation-panel">
-            <div className="panel-header">
-              Nouvelle Opération Inter-Réseaux
-            </div>
-            <div className="panel-body">
-              <form onSubmit={initiateTransfer}>
-                <div className="form-group">
-                  <label>Réseau de destination</label>
-                  <div className="provider-select">
-                    <div 
-                      className={`provider-btn orange ${selectedProvider === 'orange' ? 'selected' : ''}`}
-                      onClick={() => setSelectedProvider('orange')}
+      <div className="action-nav animate-in" style={{animationDelay: '0.05s'}}>
+        {[
+          { id: 'transfer', icon: <ArrowUpRight size={20}/>, label: 'Transfert', available: true },
+          { id: 'withdraw', icon: <ArrowDownToLine size={20}/>, label: 'Retrait', available: true },
+          { id: 'airtime', icon: <PhoneCall size={20}/>, label: 'Crédit', available: false },
+          { id: 'internet', icon: <Globe size={20}/>, label: 'Internet', available: false },
+        ].map(tab => (
+          <div key={tab.id}
+            className={`action-tab ${tab.id === activeOperation ? 'active' : ''}`}
+            onClick={() => {
+              if (tab.available) {
+                setActiveOperation(tab.id);
+                setAmount('');
+                setPhone('');
+              } else {
+                addToast('info', 'Bientôt disponible', `La fonctionnalité ${tab.label} sera disponible prochainement.`);
+              }
+            }}
+          >
+            <div className="tab-icon">{tab.icon}</div>
+            <span>{tab.label}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="working-area animate-in" style={{animationDelay: '0.1s'}}>
+        {/* Operation Panel */}
+        <div className="card">
+          <div className="card-header">
+            {activeOperation === 'withdraw'
+              ? <><ArrowDownToLine size={16} style={{marginRight:6,verticalAlign:'middle',color:'var(--accent-green)'}}/>Nouveau Retrait Mobile Money</>
+              : <><ArrowUpRight size={16} style={{marginRight:6,verticalAlign:'middle',color:'var(--accent-primary)'}}/>Nouveau Transfert Inter-Réseaux</>
+            }
+          </div>
+          <div className="card-body">
+            <form onSubmit={initiateTransfer}>
+              <div className="form-group">
+                <label>Réseau de destination</label>
+                <div className="provider-grid">
+                  {['orange', 'mtn', 'wave', 'moov'].map(p => (
+                    <div key={p}
+                      className={`provider-btn ${p} ${selectedProvider === p ? 'selected' : ''}`}
+                      onClick={() => setSelectedProvider(p)}
                     >
-                      <Smartphone size={18} /> Orange
+                      <img src={OPERATOR_LOGOS[p]} alt={OPERATOR_NAMES[p]} className="provider-logo-img" />
+                      {OPERATOR_NAMES[p]}
+                      {detectedOp === p && <span className={`detected-badge ${p}`}>Détecté</span>}
                     </div>
-                    <div 
-                      className={`provider-btn mtn ${selectedProvider === 'mtn' ? 'selected' : ''}`}
-                      onClick={() => setSelectedProvider('mtn')}
-                    >
-                      <Smartphone size={18} /> MTN
-                    </div>
-                    <div 
-                      className={`provider-btn wave ${selectedProvider === 'wave' ? 'selected' : ''}`}
-                      onClick={() => setSelectedProvider('wave')}
-                    >
-                      <Smartphone size={18} /> Wave
-                    </div>
-                    <div 
-                      className={`provider-btn moov ${selectedProvider === 'moov' ? 'selected' : ''}`}
-                      onClick={() => setSelectedProvider('moov')}
-                    >
-                      <Smartphone size={18} /> Moov
-                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {contacts.length > 0 && (
+                <div className="contacts-section">
+                  <label>Contacts rapides</label>
+                  <div className="contacts-chips">
+                    {contacts.map((c, i) => (
+                      <button key={i} type="button" className="contact-chip"
+                        onClick={() => {
+                          setPhone(formatPhoneDisplay(c.phone));
+                          setSelectedProvider(c.operator);
+                        }}
+                      >
+                        <img src={OPERATOR_LOGOS[c.operator]} alt="" style={{width: 14, height: 14, borderRadius: 3}}/>
+                        {formatPhoneDisplay(c.phone)}
+                      </button>
+                    ))}
                   </div>
                 </div>
+              )}
 
-                <div className="form-group">
-                  <label>Numéro du client</label>
-                  <input 
-                    type="tel" 
-                    className="phone-input" 
-                    placeholder="Ex: 07 00 00 00 00" 
+              <div className="form-group">
+                <label>Numéro du client</label>
+                <div className="phone-field-row">
+                  <input
+                    type="tel"
+                    className="phone-input"
+                    placeholder="Ex: 07 00 00 00 00"
                     value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
+                    onChange={handlePhoneChange}
                     required
                   />
+                  <button
+                    type="button"
+                    className="save-contact-btn"
+                    onClick={saveContact}
+                    title="Sauvegarder ce contact"
+                    disabled={!phone || phone.replace(/\s/g, '').length < 8}
+                  >
+                    <Star size={14}/>
+                  </button>
                 </div>
-
-                <div className="form-group">
-                  <label>Montant à transférer</label>
-                  <div className="amount-input">
-                    <input 
-                      type="number" 
-                      placeholder="0" 
-                      value={amount}
-                      onChange={(e) => setAmount(e.target.value)}
-                      required
-                      min="100"
-                    />
-                    <span className="currency">XOF</span>
-                  </div>
-                </div>
-
-                <button type="submit" className="submit-btn" disabled={isProcessing || pendingTxRef.current}>
-                  {pendingTxRef.current ? <RefreshCw className="spinner" size={20} style={{animation: 'spin 1s linear infinite'}}/> : 'Valider la transaction'}
-                </button>
-              </form>
-            </div>
-          </div>
-
-          {/* Ledger / Recent Activity Panel */}
-          <div className="glass-panel ledger-panel">
-            <div className="panel-header" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-              Historique en direct
-              <span style={{fontSize: '12px', color: 'var(--accent-primary)', cursor: 'pointer'}} onClick={fetchData}><RefreshCw size={14}/></span>
-            </div>
-            <div className="panel-body tx-body">
-              <div className="tx-list">
-                
-                {transactions.length === 0 ? (
-                  <p style={{color: 'var(--text-muted)', textAlign: 'center', marginTop: '20px'}}>Aucune transaction</p>
-                ) : (
-                  transactions.map(tx => (
-                    <div className="tx-item" key={tx.id}>
-                      <div className="tx-info">
-                        <div className={`tx-icon ${tx.provider}`}>
-                          {getProviderIcon(tx.provider)}
-                        </div>
-                        <div className="tx-details">
-                          <p style={{textTransform: 'capitalize'}}>{tx.type} {tx.provider}</p>
-                          <span>{tx.phone}</span>
-                        </div>
-                      </div>
-                      <div className={`tx-amount ${tx.status === 'SUCCESS' ? 'debit' : ''}`}>
-                        <p style={{fontWeight: '600', textDecoration: tx.status === 'FAILED' ? 'line-through' : 'none', color: tx.status === 'FAILED' ? 'var(--text-muted)' : 'white'}}>
-                          - {new Intl.NumberFormat('fr-FR').format(tx.amount)} F
-                        </p>
-                        {getStatusBadge(tx.status)}
-                      </div>
-                    </div>
-                  ))
-                )}
-
               </div>
-            </div>
+
+              <div className="form-group">
+                <label>{activeOperation === 'withdraw' ? 'Montant du retrait' : 'Montant à transférer'}</label>
+                <div className="amount-input">
+                  <input
+                    type="number"
+                    placeholder="0"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    required min="100"
+                  />
+                  <span className="currency">FCFA</span>
+                </div>
+              </div>
+
+              {activeOperation === 'withdraw' && (
+                <div className="retrait-info-banner">
+                  <ArrowDownToLine size={14}/>
+                  Le client vous envoie les fonds — votre solde sera crédité après confirmation.
+                </div>
+              )}
+
+              <button type="submit"
+                className={`submit-btn${activeOperation === 'withdraw' ? ' retrait' : ''}`}
+                disabled={isProcessing || pendingTxRef.current}
+              >
+                {pendingTxRef.current
+                  ? <RefreshCw size={20} style={{animation: 'spin 1s linear infinite'}}/>
+                  : activeOperation === 'withdraw'
+                    ? <><ArrowDownToLine size={18}/> Valider le retrait</>
+                    : <><Send size={18}/> Valider la transaction</>
+                }
+              </button>
+            </form>
           </div>
         </div>
-      </main>
 
-      {/* --- PIN MODAL OVERLAY --- */}
-      {showPinModal && (
-        <div className="modal-overlay">
-          <div className="pin-modal">
-            <h3>Saisissez votre code PIN</h3>
-            <p>Pour valider l'envoi de {new Intl.NumberFormat('fr-FR').format(amount)} F</p>
-            
-            <div className="pin-dots">
-              {[0, 1, 2, 3].map(i => (
-                <div key={i} className={`pin-dot ${pinCode.length > i ? 'filled' : ''}`}></div>
-              ))}
+        {/* Recent Activity */}
+        <div className="card">
+          <div className="card-header">
+            Historique en direct
+            <span style={{fontSize: '12px', color: 'var(--accent-primary)', cursor: 'pointer'}} onClick={fetchData}><RefreshCw size={14}/></span>
+          </div>
+          <div className="card-body tx-body">
+            <div className="tx-list">
+              {transactions.length === 0 ? (
+                <p style={{color: 'var(--text-muted)', textAlign: 'center', marginTop: '20px'}}>Aucune transaction</p>
+              ) : (
+                transactions.slice(0, 5).map(tx => (
+                  <div className="tx-item" key={tx.id}>
+                    <div className="tx-info">
+                      <img src={OPERATOR_LOGOS[tx.provider]} alt={tx.provider} className="tx-logo" />
+                      <div className="tx-details">
+                        <p style={{textTransform: 'capitalize'}}>{tx.type} {OPERATOR_NAMES[tx.provider] || tx.provider}</p>
+                        <span>{tx.phone}</span>
+                      </div>
+                    </div>
+                    <div className={`tx-amount`}>
+                      <p style={{fontWeight: '600', textDecoration: tx.status === 'FAILED' ? 'line-through' : 'none', color: tx.status === 'FAILED' ? 'var(--text-muted)' : tx.type === 'RETRAIT' ? 'var(--accent-green)' : 'var(--text-dark)'}}>
+                        {tx.type === 'RETRAIT' ? '+' : '-'} {new Intl.NumberFormat('fr-FR').format(tx.amount)} F
+                      </p>
+                      {getStatusBadge(tx.status)}
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
-
-            <div className="keypad">
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(num => (
-                <button key={num} className="key-btn" onClick={() => handlePinKeyPress(num.toString())}>
-                  {num}
-                </button>
-              ))}
-              <button className="key-btn cancel" onClick={() => setShowPinModal(false)}>
-                Annuler
+            {transactions.length > 5 && (
+              <button className="view-all-btn" onClick={() => setActiveTab('transactions')}>
+                Voir tout l'historique
               </button>
-              <button className="key-btn" onClick={() => handlePinKeyPress('0')}>
-                0
-              </button>
-              <button className="key-btn delete" onClick={handlePinDelete}>
-                <Delete size={24} />
-              </button>
-            </div>
-
-            {isProcessing && (
-              <div style={{marginTop: '20px', color: 'var(--accent-primary)', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px'}}>
-                <RefreshCw size={16} style={{animation: 'spin 1s linear infinite'}}/>
-                <span>Vérification...</span>
-              </div>
             )}
           </div>
         </div>
-      )}
+      </div>
+    </>
+  );
 
-      {/* --- RECEIPT MODAL OVERLAY --- */}
-      {receiptData && (
-        <div className="modal-overlay" style={{zIndex: 200}}>
-          <div className="receipt-modal">
-            
-            {/* The actual receipt element to be screenshotted */}
-            <div className="receipt-paper" ref={receiptRef}>
-              <div className="receipt-header">
-                <div className="receipt-logo"><Zap size={24} fill="currentColor" /></div>
-                <h2>CABINE 2.0</h2>
-                <p>Agence de {agentName}</p>
-                <p>Reçu de Transaction</p>
-              </div>
-              
-              <div className="receipt-divider"></div>
-              
-              <div className="receipt-row">
-                <span>Date:</span>
-                <span>{new Date(receiptData.created_at).toLocaleString('fr-FR')}</span>
-              </div>
-              <div className="receipt-row">
-                <span>ID Trans:</span>
-                <span>TX-{receiptData.id.toString().padStart(6, '0')}</span>
-              </div>
-              <div className="receipt-row">
-                <span>Opérateur:</span>
-                <span style={{textTransform: 'capitalize'}}>{receiptData.provider}</span>
-              </div>
-              <div className="receipt-row">
-                <span>Numéro:</span>
-                <span style={{fontWeight: 'bold'}}>{receiptData.phone}</span>
-              </div>
-              
-              <div className="receipt-divider"></div>
-              
-              <div className="receipt-total">
-                <span>Montant Envoyé</span>
-                <h2>{new Intl.NumberFormat('fr-FR').format(receiptData.amount)} FCFA</h2>
-              </div>
-              
-              <div className="receipt-divider"></div>
-              <div className="receipt-footer">
-                <p>Statut : <span style={{color: '#22c55e', fontWeight: 'bold'}}>RÉUSSI</span></p>
-                <p>Merci de votre confiance !</p>
-              </div>
+  const renderTransactions = () => (
+    <div className="animate-in">
+      <div className="dashboard-header" style={{marginBottom: '20px'}}>
+        <div className="header-title">
+          <h1>Historique Complet</h1>
+          <p>Toutes vos transactions récentes</p>
+        </div>
+      </div>
+      <div className="card" style={{minHeight: '60vh'}}>
+        <div className="card-header">
+          Transactions (Ledger)
+          <span style={{fontSize: '12px', color: 'var(--accent-primary)', cursor: 'pointer'}} onClick={fetchData}><RefreshCw size={14} style={{marginRight: '5px', verticalAlign:'middle'}}/> Actualiser</span>
+        </div>
+        <div className="filter-panel">
+          <div className="filter-row">
+            <input
+              type="search"
+              className="filter-input"
+              placeholder="Rechercher par numéro, opérateur, référence..."
+              value={transactionSearch}
+              onChange={(e) => setTransactionSearch(e.target.value)}
+            />
+            <select className="filter-input" value={transactionStatus} onChange={(e) => setTransactionStatus(e.target.value)}>
+              <option value="all">Tous statuts</option>
+              <option value="PENDING">En cours</option>
+              <option value="PROCESSING">Processing</option>
+              <option value="SUCCESS">Succès</option>
+              <option value="FAILED">Échec</option>
+            </select>
+          </div>
+          <div className="filter-row" style={{justifyContent: 'space-between', gap: '12px'}}>
+            <div className="date-filter">
+              <label>Date début</label>
+              <input type="date" value={transactionSince} onChange={(e) => setTransactionSince(e.target.value)} />
             </div>
+            <div className="date-filter">
+              <label>Date fin</label>
+              <input type="date" value={transactionUntil} onChange={(e) => setTransactionUntil(e.target.value)} />
+            </div>
+            <button className="export-btn" onClick={downloadTransactionsCsv}>
+              <Download size={14} style={{marginRight: '6px'}} /> Exporter CSV
+            </button>
+          </div>
+        </div>
+        <div className="card-body tx-body" style={{maxHeight: 'none'}}>
+          <div className="tx-list">
+            {transactions.length === 0 ? (
+              <p style={{color: 'var(--text-muted)', textAlign: 'center', marginTop: '40px'}}>Aucune transaction disponible.</p>
+            ) : (
+              transactions.map(tx => (
+                <div className="tx-item" key={tx.id} style={{padding: '14px 0'}}>
+                  <div className="tx-info">
+                    <img src={OPERATOR_LOGOS[tx.provider]} alt={tx.provider} className="tx-logo" />
+                    <div className="tx-details">
+                      <p style={{fontWeight: '600'}}>
+                        {tx.type === 'RETRAIT' && <span className="type-badge retrait">Retrait</span>}
+                        {OPERATOR_NAMES[tx.provider] || tx.provider}
+                        <span style={{fontSize:'11px', color:'var(--text-muted)', fontWeight:'normal', marginLeft:'6px'}}>{new Date(tx.created_at).toLocaleString('fr-FR')}</span>
+                      </p>
+                      <span>{tx.phone} • TX-{tx.id.toString().padStart(6, '0')}{tx.geniuspay_ref ? ` • ${tx.geniuspay_ref}` : ''}</span>
+                    </div>
+                  </div>
+                  <div className="tx-actions-row">
+                    <div className="tx-amount" style={{textAlign: 'right'}}>
+                      <p style={{fontWeight: '600', textDecoration: tx.status === 'FAILED' ? 'line-through' : 'none', color: tx.status === 'FAILED' ? 'var(--text-muted)' : tx.type === 'RETRAIT' ? 'var(--accent-green)' : 'var(--text-dark)'}}>
+                        {tx.type === 'RETRAIT' ? '+' : '-'} {new Intl.NumberFormat('fr-FR').format(tx.amount)} F
+                      </p>
+                      {getStatusBadge(tx.status)}
+                    </div>
+                    {tx.status === 'SUCCESS' && (
+                       <button className="icon-btn" onClick={() => setReceiptData(tx)} title="Voir le reçu">
+                         <Printer size={16} />
+                       </button>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 
-            <div className="receipt-actions">
-              <button className="btn-secondary" onClick={() => setReceiptData(null)}>
-                Fermer
+  const renderSettings = () => (
+    <div className="animate-in">
+      <div className="dashboard-header" style={{marginBottom: '20px'}}>
+        <div className="header-title">
+          <h1>Paramètres du compte</h1>
+          <p>Gérez vos préférences et votre sécurité</p>
+        </div>
+      </div>
+
+      <div className="settings-grid">
+        <div className="card settings-panel">
+          <div className="card-header">
+            <Lock size={18} style={{marginRight: '8px', verticalAlign: 'middle'}}/> 
+            Sécurité (Modifier le PIN)
+          </div>
+          <div className="card-body">
+            <form onSubmit={handleUpdatePin}>
+              <div className="form-group">
+                <label>Ancien code PIN</label>
+                <input 
+                  type="password" 
+                  maxLength="4"
+                  placeholder="****"
+                  value={oldPin}
+                  onChange={(e) => setOldPin(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label>Nouveau code PIN (4 chiffres)</label>
+                <input 
+                  type="password" 
+                  maxLength="4"
+                  placeholder="****"
+                  value={newPin}
+                  onChange={(e) => setNewPin(e.target.value)}
+                  required
+                />
+              </div>
+              <button type="submit" className="submit-btn" style={{marginTop: '10px'}}>
+                Mettre à jour le PIN
               </button>
-              <button className="btn-primary" onClick={downloadReceipt}>
-                <Download size={18} /> Télécharger l'image
-              </button>
+              {pinUpdateMessage && (
+                <div style={{marginTop: '15px', color: pinUpdateMessage.includes('✅') ? '#22c55e' : 'var(--accent-red)', fontSize: '14px', textAlign: 'center'}}>
+                  {pinUpdateMessage}
+                </div>
+              )}
+            </form>
+          </div>
+        </div>
+
+        <div className="card settings-panel">
+           <div className="card-header">
+            Profil de l'agent
+          </div>
+          <div className="card-body">
+             <div className="profile-info-row">
+               <span>Nom :</span> <strong>{agentName}</strong>
+             </div>
+             <div className="profile-info-row" style={{marginTop: '10px'}}>
+               <span>Identifiant Agence :</span> <strong>ABJ-001</strong>
+             </div>
+             <div className="profile-info-row" style={{marginTop: '10px'}}>
+               <span>Localisation :</span> <strong>Abidjan, Cocody</strong>
+             </div>
+          </div>
+        </div>
+
+        <div className="card settings-panel" style={{gridColumn: '1 / -1'}}>
+          <div className="card-header">
+            <Radio size={18} style={{marginRight: '8px', verticalAlign: 'middle'}}/>
+            Statut GeniusPay
+          </div>
+          <div className="card-body" style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '16px'}}>
+            <div className="profile-info-row" style={{flexDirection: 'column', alignItems: 'center', textAlign: 'center', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '16px'}}>
+              <span>Connexion</span>
+              <strong style={{color: gpStatus.connected ? 'var(--accent-green)' : 'var(--accent-red)', fontSize: '18px', marginTop: '8px'}}>
+                {gpStatus.connected ? '✅' : '❌'}
+              </strong>
+            </div>
+            <div className="profile-info-row" style={{flexDirection: 'column', alignItems: 'center', textAlign: 'center', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '16px'}}>
+              <span>Mode</span>
+              <strong style={{fontSize: '14px', marginTop: '8px'}}>
+                {gpStatus.mode === 'sandbox' ? '🧪 Sandbox' : '🔴 Live'}
+              </strong>
+            </div>
+            <div className="profile-info-row" style={{flexDirection: 'column', alignItems: 'center', textAlign: 'center', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '16px'}}>
+              <span>Clés API</span>
+              <strong style={{color: gpStatus.hasKeys ? 'var(--accent-green)' : 'var(--accent-red)', fontSize: '18px', marginTop: '8px'}}>
+                {gpStatus.hasKeys ? '✅' : '❌'}
+              </strong>
+            </div>
+            <div className="profile-info-row" style={{flexDirection: 'column', alignItems: 'center', textAlign: 'center', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '16px'}}>
+              <span>Wallet</span>
+              <strong style={{fontSize: '12px', marginTop: '8px'}}>
+                {gpStatus.walletId || 'Auto'}
+              </strong>
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  );
+
+  const renderAnalytics = () => {
+    if (!analytics) {
+      return (
+        <div className="animate-in" style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',minHeight:'300px',gap:'16px'}}>
+          <RefreshCw size={28} style={{animation:'spin 1s linear infinite',color:'var(--accent-primary)'}}/>
+          <p style={{color:'var(--text-muted)'}}>Chargement des analytiques...</p>
+        </div>
+      );
+    }
+
+    const today = analytics.today || {};
+    const yesterday = analytics.yesterday || {};
+    const allTime = analytics.allTime || {};
+    const todayVol = parseInt(today.volume) || 0;
+    const yesterdayVol = parseInt(yesterday.volume) || 0;
+    const todayTx = parseInt(today.total) || 0;
+    const yesterdayTx = parseInt(yesterday.total) || 0;
+    const todaySuccess = parseInt(today.success) || 0;
+    const todayRate = todayTx > 0 ? Math.round(todaySuccess / todayTx * 100) : 0;
+    const volChange = yesterdayVol > 0 ? ((todayVol - yesterdayVol) / yesterdayVol * 100) : null;
+    const txChange = yesterdayTx > 0 ? ((todayTx - yesterdayTx) / yesterdayTx * 100) : null;
+    const totalAllTime = parseInt(allTime.total) || 0;
+    const volumeAllTime = parseInt(allTime.volume) || 0;
+
+    const last7 = Array.from({length: 7}, (_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (6 - i));
+      const dateStr = d.toISOString().slice(0, 10);
+      const found = (analytics.daily || []).find(r => (r.day || '').slice(0, 10) === dateStr);
+      const [y, m, day] = dateStr.split('-');
+      const localDate = new Date(parseInt(y), parseInt(m) - 1, parseInt(day));
+      return {
+        label: localDate.toLocaleDateString('fr-FR', {weekday: 'short'}),
+        value: found ? (parseInt(found.volume) || 0) : 0,
+      };
+    });
+
+    const donutSlices = (analytics.byOperator || []).map(op => ({
+      label: OPERATOR_NAMES[op.provider] || op.provider,
+      value: parseInt(op.volume) || 0,
+      color: OPERATOR_COLORS[op.provider] || '#6366f1',
+    }));
+
+    const TrendBadge = ({ change }) => {
+      if (change === null || change === undefined) return <span className="trend-badge neutral">—</span>;
+      const isUp = change >= 0;
+      return (
+        <span className={`trend-badge ${isUp ? 'up' : 'down'}`}>
+          {isUp ? <TrendingUp size={11}/> : <TrendingDown size={11}/>}
+          {Math.abs(change).toFixed(1)}%
+        </span>
+      );
+    };
+
+    return (
+      <div className="animate-in">
+        <div className="dashboard-header" style={{marginBottom: '20px'}}>
+          <div className="header-title">
+            <h1>Analytiques</h1>
+            <p>Performance et statistiques de votre cabine</p>
+          </div>
+          <button className="export-btn" onClick={fetchAnalytics} style={{alignSelf:'flex-start'}}>
+            <RefreshCw size={13}/> Actualiser
+          </button>
+        </div>
+
+        <div className="analytics-kpi-row">
+          <div className="analytics-kpi-card">
+            <div className="kpi-top">
+              <span className="kpi-label">Transactions aujourd'hui</span>
+              <TrendBadge change={txChange}/>
+            </div>
+            <div className="kpi-value">{todayTx}</div>
+            <div className="kpi-sub">vs {yesterdayTx} hier</div>
+          </div>
+          <div className="analytics-kpi-card">
+            <div className="kpi-top">
+              <span className="kpi-label">Volume aujourd'hui</span>
+              <TrendBadge change={volChange}/>
+            </div>
+            <div className="kpi-value" style={{fontSize:'22px'}}>
+              {new Intl.NumberFormat('fr-FR').format(todayVol)}
+            </div>
+            <div className="kpi-sub">FCFA · hier : {new Intl.NumberFormat('fr-FR').format(yesterdayVol)}</div>
+          </div>
+          <div className="analytics-kpi-card">
+            <div className="kpi-top">
+              <span className="kpi-label">Taux de succès</span>
+            </div>
+            <div className="kpi-value">{todayRate}%</div>
+            <div className="kpi-sub">{todaySuccess}/{todayTx} transactions</div>
+          </div>
+          <div className="analytics-kpi-card highlight">
+            <div className="kpi-top">
+              <span className="kpi-label">Volume total (all-time)</span>
+            </div>
+            <div className="kpi-value" style={{fontSize:'20px'}}>
+              {new Intl.NumberFormat('fr-FR', {notation:'compact', maximumFractionDigits:1}).format(volumeAllTime)}
+            </div>
+            <div className="kpi-sub">{totalAllTime} transactions au total</div>
+          </div>
+        </div>
+
+        <div className="charts-row">
+          <div className="card chart-card">
+            <div className="card-header">
+              Volume — 7 derniers jours (FCFA)
+            </div>
+            <div className="card-body">
+              <BarChart data={last7}/>
+            </div>
+          </div>
+          <div className="card chart-card">
+            <div className="card-header">Répartition par opérateur</div>
+            <div className="card-body donut-section">
+              <DonutChart slices={donutSlices}/>
+              <div className="donut-legend">
+                {donutSlices.length > 0 ? donutSlices.map((s, i) => (
+                  <div key={i} className="legend-item">
+                    <div className="legend-dot" style={{background: s.color}}/>
+                    <span>{s.label}</span>
+                    <strong>
+                      {new Intl.NumberFormat('fr-FR', {notation:'compact', maximumFractionDigits:1}).format(s.value)}
+                    </strong>
+                  </div>
+                )) : <p style={{color:'var(--text-muted)',fontSize:'13px'}}>Aucune transaction réussie</p>}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="card" style={{marginTop:'20px', marginBottom:'40px'}}>
+          <div className="card-header">Activité horaire — Aujourd'hui</div>
+          <div className="card-body">
+            <p style={{fontSize:'12px',color:'var(--text-muted)',marginBottom:'12px'}}>
+              Chaque cellule représente une heure de la journée. La cellule surlignée = heure courante.
+            </p>
+            <HourlyHeatmap hourly={analytics.hourly || []}/>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="app-container">
+      {isLoading ? (
+        <div className="loading-screen">
+          <div className="loading-content">
+            <div className="loading-logo">
+              <div className="logo-icon loading-pulse">
+                <Zap size={32} color="white" fill="white" />
+              </div>
+              <h1>Cabine 2.0</h1>
+              <p>Initialisation du système...</p>
+            </div>
+            <div className="loading-progress">
+              <div className="progress-bar">
+                <div className="progress-fill"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Mobile Header */}
+          <div className="mobile-header">
+            <div className="logo-area">
+              <div className="logo-icon">
+                <Zap size={20} color="white" fill="white" />
+              </div>
+              <span>Cabine 2.0</span>
+            </div>
+            <button className="menu-toggle" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>
+              <Menu size={24} color="white" />
+            </button>
+          </div>
+
+          {/* Sidebar */}
+          <aside className={`sidebar ${mobileMenuOpen ? 'open' : ''}`}>
+            <div className="logo-area desktop-logo">
+              <div className="logo-icon">
+                <Zap size={24} color="white" fill="white" />
+              </div>
+              <span>Cabine 2.0</span>
+            </div>
+
+            <nav className="nav-menu">
+              <div className={`nav-item ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => { setActiveTab('dashboard'); setMobileMenuOpen(false); }}>
+                <LayoutDashboard size={20} />
+                <span>Tableau de bord</span>
+              </div>
+              <div className={`nav-item ${activeTab === 'transactions' ? 'active' : ''}`} onClick={() => { setActiveTab('transactions'); setMobileMenuOpen(false); }}>
+                <History size={20} />
+                <span>Historique (Ledger)</span>
+              </div>
+              <div className={`nav-item ${activeTab === 'analytics' ? 'active' : ''}`} onClick={() => { setActiveTab('analytics'); setMobileMenuOpen(false); }}>
+                <BarChart2 size={20} />
+                <span>Analytiques</span>
+              </div>
+              <div className={`nav-item ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => { setActiveTab('settings'); setMobileMenuOpen(false); }}>
+                <Settings size={20} />
+                <span>Paramètres</span>
+              </div>
+            </nav>
+
+            <div className="agent-card">
+              <div className="avatar">{avatarInitials}</div>
+              <div className="agent-info">
+                <h4>{agentName}</h4>
+                <p>Agent Principal</p>
+              </div>
+              <div style={{display: 'flex', gap: '8px'}}>
+                <button 
+                  onClick={() => setDarkMode(!darkMode)}
+                  style={{
+                    padding: '4px',
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--text-muted)',
+                    cursor: 'pointer',
+                    borderRadius: '4px'
+                  }}
+                  title={darkMode ? 'Mode clair' : 'Mode sombre'}
+                >
+                  {darkMode ? '☀️' : '🌙'}
+                </button>
+                <LogOut size={18} color="#ef4444" style={{cursor: 'pointer'}} />
+              </div>
+            </div>
+          </aside>
+
+          {/* Offline Banner */}
+          {isOffline && (
+            <div className="offline-banner">
+              <AlertTriangle size={16} /> Connexion au serveur perdue — vérifiez votre réseau
+            </div>
+          )}
+
+          {/* Main Content */}
+          <main className="main-content" onClick={() => mobileMenuOpen && setMobileMenuOpen(false)}>
+            {activeTab === 'dashboard' && renderDashboard()}
+            {activeTab === 'transactions' && renderTransactions()}
+            {activeTab === 'analytics' && renderAnalytics()}
+            {activeTab === 'settings' && renderSettings()}
+          </main>
+
+          {/* --- CONFIRMATION MODAL --- */}
+          {showConfirmModal && (
+            <div className="modal-overlay">
+              <div className="confirm-modal">
+                <h3>{activeOperation === 'withdraw' ? 'Confirmer le retrait' : 'Confirmer la transaction'}</h3>
+                {activeOperation === 'withdraw' && (
+                  <p style={{textAlign:'center', fontSize:'13px', color:'var(--text-muted)', marginBottom:'16px'}}>
+                    Le client vous envoie les fonds depuis son mobile money.
+                  </p>
+                )}
+                <div className="confirm-summary">
+                  <div className="confirm-row">
+                    <span>Opérateur</span>
+                    <span className="confirm-value">
+                      <img src={OPERATOR_LOGOS[selectedProvider]} alt="" style={{width: 22, height: 22, borderRadius: 6, verticalAlign: 'middle', marginRight: 6}} />
+                      {OPERATOR_NAMES[selectedProvider]}
+                    </span>
+                  </div>
+                  <div className="confirm-row">
+                    <span>{activeOperation === 'withdraw' ? 'Numéro client' : 'Numéro'}</span>
+                    <span className="confirm-value">{phone}</span>
+                  </div>
+                  <div className="confirm-row">
+                    <span>{activeOperation === 'withdraw' ? 'Montant à encaisser' : 'Montant'}</span>
+                    <span className="confirm-value" style={{color: activeOperation === 'withdraw' ? 'var(--accent-green)' : undefined}}>
+                      {activeOperation === 'withdraw' ? '+' : ''}{new Intl.NumberFormat('fr-FR').format(amount)} FCFA
+                    </span>
+                  </div>
+                </div>
+                <div className="confirm-actions">
+                  <button className="btn-secondary" onClick={() => setShowConfirmModal(false)}>
+                    Annuler
+                  </button>
+                  <button
+                    className={activeOperation === 'withdraw' ? 'btn-retrait' : 'btn-primary'}
+                    onClick={() => { setShowConfirmModal(false); setShowPinModal(true); }}
+                  >
+                    {activeOperation === 'withdraw' ? 'Confirmer le retrait' : 'Confirmer'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* --- PIN MODAL --- */}
+          {showPinModal && (
+            <div className="modal-overlay">
+              <div className="pin-modal">
+                <h3>Code PIN de sécurité</h3>
+                <p>Entrez votre code PIN à 4 chiffres</p>
+
+                <div className="pin-display">
+                  {[0, 1, 2, 3].map(i => (
+                    <div key={i} className={`pin-dot ${pinCode.length > i ? 'filled' : ''}`}></div>
+                  ))}
+                </div>
+
+                <div className="keypad">
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(num => (
+                    <button key={num} className="key-btn" onClick={() => handlePinKeyPress(num.toString())}>
+                      {num}
+                    </button>
+                  ))}
+                  <button className="key-btn cancel" onClick={() => setShowPinModal(false)}>
+                    Annuler
+                  </button>
+                  <button className="key-btn" onClick={() => handlePinKeyPress('0')}>
+                    0
+                  </button>
+                  <button className="key-btn delete" onClick={handlePinDelete}>
+                    <Delete size={24} />
+                  </button>
+                </div>
+
+                {isProcessing && (
+                  <div style={{marginTop: '20px', color: 'var(--accent-primary)', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px'}}>
+                    <RefreshCw size={16} style={{animation: 'spin 1s linear infinite'}}/>
+                    <span>Vérification...</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {receiptData && (
+            <div className="modal-overlay" style={{zIndex: 200}}>
+              <div className="receipt-modal">
+                <div className="receipt-paper" ref={receiptRef}>
+                  <div className="receipt-header">
+                    <div className="receipt-brand">
+                      <Zap size={18} fill="#6366f1" color="#6366f1" />
+                      <span style={{fontWeight: 800, color: '#111827', fontSize: '16px'}}>CABINE 2.0</span>
+                    </div>
+                    <h2>REÇU DE TRANSACTION</h2>
+                    <p>{agentName} • Abidjan</p>
+                  </div>
+
+                  <hr className="receipt-divider" />
+
+                  <div className="receipt-row">
+                    <span>Date</span>
+                    <span>{new Date(receiptData.created_at).toLocaleString('fr-FR')}</span>
+                  </div>
+                  <div className="receipt-row">
+                    <span>Référence</span>
+                    <span style={{fontWeight: 600}}>TX-{receiptData.id.toString().padStart(6, '0')}</span>
+                  </div>
+                  <div className="receipt-row">
+                    <span>Opérateur</span>
+                    <span style={{display: 'flex', alignItems: 'center', gap: '6px'}}>
+                      <img src={OPERATOR_LOGOS[receiptData.provider]} alt="" style={{width: '18px', height: '18px', borderRadius: '4px'}} />
+                      {OPERATOR_NAMES[receiptData.provider] || receiptData.provider}
+                    </span>
+                  </div>
+                  <div className="receipt-row">
+                    <span>Destinataire</span>
+                    <span style={{fontWeight: 600}}>{receiptData.phone}</span>
+                  </div>
+                  {receiptData.geniuspay_ref && (
+                    <div className="receipt-row">
+                      <span>Réf. paiement</span>
+                      <span style={{fontSize: '11px', fontWeight: 500}}>{receiptData.geniuspay_ref}</span>
+                    </div>
+                  )}
+
+                  <div className="receipt-total">
+                    <span>{receiptData.type === 'RETRAIT' ? 'Montant encaissé' : 'Montant envoyé'}</span>
+                    <h2 style={{color: receiptData.type === 'RETRAIT' ? '#10b981' : '#111827'}}>
+                      {receiptData.type === 'RETRAIT' ? '+' : ''}{new Intl.NumberFormat('fr-FR').format(receiptData.amount)} FCFA
+                    </h2>
+                    <div className="receipt-status">
+                      <CheckCircle2 size={14} /> {receiptData.type === 'RETRAIT' ? 'Retrait réussi' : 'Transaction réussie'}
+                    </div>
+                  </div>
+
+                  <hr className="receipt-divider" />
+                  <div className="receipt-footer">
+                    <p>Cabine 2.0 — Transfert Inter-Réseaux</p>
+                    <p style={{marginTop: '2px'}}>Merci de votre confiance !</p>
+                  </div>
+                </div>
+
+                <div className="receipt-actions">
+                  <button className="btn-secondary" onClick={() => setReceiptData(null)}>
+                    Fermer
+                  </button>
+                  <button className="btn-primary" onClick={downloadReceipt}>
+                    <Download size={16} /> Télécharger
+                  </button>
+                  <button className="btn-secondary" onClick={shareReceipt} style={{color: 'var(--accent-blue)'}}>
+                    <Share2 size={16} /> Partager
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Toast Notifications */}
+          <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+
+          <style dangerouslySetInnerHTML={{__html: `
+            @keyframes spin { 100% { transform: rotate(360deg); } }
+          `}} />
+        </>
       )}
 
       <style dangerouslySetInnerHTML={{__html: `

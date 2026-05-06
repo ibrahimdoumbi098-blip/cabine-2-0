@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect width="200" height="200" rx="32" fill="#FF6600"/>
+  <text x="100" y="160" text-anchor="middle" font-family="Helvetica Neue, Arial, sans-serif" font-weight="700" font-size="48" fill="white" letter-spacing="-1">orange</text>
+  <text x="180" y="125" font-family="Helvetica Neue, Arial, sans-serif" font-weight="400" font-size="18" fill="white">™</text>
+</svg>

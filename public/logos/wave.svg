@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect width="200" height="200" rx="32" fill="#00C8FF"/>
+  <!-- Penguin body -->
+  <ellipse cx="100" cy="115" rx="42" ry="55" fill="#1a1a1a"/>
+  <!-- Penguin belly -->
+  <ellipse cx="100" cy="125" rx="26" ry="38" fill="white"/>
+  <!-- Penguin head -->
+  <circle cx="100" cy="68" r="28" fill="#1a1a1a"/>
+  <!-- Left eye -->
+  <circle cx="90" cy="62" r="5" fill="white"/>
+  <circle cx="91" cy="62" r="2.5" fill="#1a1a1a"/>
+  <!-- Right eye -->
+  <circle cx="110" cy="62" r="5" fill="white"/>
+  <circle cx="111" cy="62" r="2.5" fill="#1a1a1a"/>
+  <!-- Beak -->
+  <path d="M95 72 L100 80 L105 72 Z" fill="#FF8C00"/>
+  <!-- Left wing (waving) -->
+  <path d="M58 100 C45 85, 42 80, 48 72 C52 66, 56 74, 60 82 L62 105 Z" fill="#1a1a1a"/>
+  <!-- Right wing -->
+  <path d="M138 95 C142 100, 145 110, 142 120 L138 115 Z" fill="#1a1a1a"/>
+  <!-- Left foot -->
+  <path d="M80 165 L72 172 L90 172 L88 165 Z" fill="#FF8C00"/>
+  <!-- Right foot -->
+  <path d="M112 165 L110 172 L128 172 L120 165 Z" fill="#FF8C00"/>
+</svg>

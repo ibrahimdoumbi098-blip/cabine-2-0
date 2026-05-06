@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect width="200" height="200" rx="32" fill="white"/>
+  <!-- Diamond shape (rotated square) -->
+  <g transform="translate(100,100) rotate(45)">
+    <rect x="-70" y="-70" width="140" height="140" rx="12" fill="#F37021"/>
+  </g>
+  <!-- MOOV text -->
+  <text x="100" y="92" text-anchor="middle" font-family="Arial Black, Impact, sans-serif" font-weight="900" font-size="28" fill="#003087" letter-spacing="1">MOOV</text>
+  <!-- Money text -->
+  <text x="100" y="124" text-anchor="middle" font-family="Arial, sans-serif" font-weight="800" font-size="32" fill="white" font-style="italic">Money</text>
+  <!-- Small envelope/money icon -->
+  <g transform="translate(148, 100) scale(0.6)">
+    <rect x="0" y="0" width="24" height="16" rx="2" fill="#003087" opacity="0.8"/>
+    <path d="M0 0 L12 10 L24 0" stroke="white" stroke-width="1.5" fill="none"/>
+  </g>
+</svg>

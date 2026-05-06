@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect width="200" height="200" rx="32" fill="#FFC600"/>
+  <ellipse cx="100" cy="100" rx="70" ry="48" fill="#003087" stroke="#003087" stroke-width="2"/>
+  <text x="100" y="115" text-anchor="middle" font-family="Arial Black, Impact, sans-serif" font-weight="900" font-size="52" fill="white" letter-spacing="2">MTN</text>
+</svg>
