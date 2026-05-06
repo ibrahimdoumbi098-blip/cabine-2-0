@@ -4,7 +4,7 @@ import {
   History, Settings, LogOut, Zap, CheckCircle2, Clock,
   XCircle, RefreshCw, Menu, Delete, Printer, Share2, Lock,
   AlertTriangle, Info, X, Download, Send,
-  TrendingUp, TrendingDown, BarChart2, Star, Wifi,
+  TrendingUp, TrendingDown, BarChart2, Radio, Star, Wifi,
   ChevronLeft, ChevronRight, Copy, Ban
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
@@ -490,11 +490,10 @@ function App() {
 
   const handlePinKeyPress = (digit) => {
     if (pinCode.length < 4) {
-      const newPin = pinCode + digit;
-      setPinCode(newPin);
-      
-      if (newPin.length === 4) {
-        executeTransfer(newPin);
+      const entered = pinCode + digit;
+      setPinCode(entered);
+      if (entered.length === 4) {
+        executeTransfer(entered);
       }
     }
   };
@@ -622,7 +621,7 @@ function App() {
               console.log("Partage annulé ou échoué", error);
             }
           } else {
-            alert("Le partage natif n'est pas supporté sur cet appareil.");
+            addToast('info', 'Partage non disponible', "Le partage natif n'est pas supporté sur cet appareil.");
           }
         }, "image/png");
       } catch (err) {
@@ -889,12 +888,21 @@ function App() {
                   <div className="amount-input">
                     <input
                       type="number"
+                      inputMode="numeric"
                       placeholder="0"
                       value={amount}
                       onChange={(e) => setAmount(e.target.value)}
-                      required min="100"
+                      required min="100" max="5000000"
                     />
                     <span className="currency">FCFA</span>
+                  </div>
+                  <div className="quick-amounts">
+                    {[500, 1000, 2000, 5000].map(v => (
+                      <button key={v} type="button" className="quick-amount-btn"
+                        onClick={() => setAmount(String(v))}>
+                        {new Intl.NumberFormat('fr-FR').format(v)}
+                      </button>
+                    ))}
                   </div>
                 </div>
               )}
@@ -1499,6 +1507,14 @@ function App() {
                         {activeOperation === 'withdraw' ? '+' : ''}{new Intl.NumberFormat('fr-FR').format(displayAmount)} FCFA
                       </span>
                     </div>
+                    {activeOperation !== 'withdraw' && (
+                      <div className="confirm-row" style={{opacity: 0.7, fontSize: '12px'}}>
+                        <span>Solde après opération</span>
+                        <span className="confirm-value" style={{color: balance - displayAmount < 0 ? 'var(--accent-red)' : 'var(--text-muted)'}}>
+                          {new Intl.NumberFormat('fr-FR').format(balance - displayAmount)} FCFA
+                        </span>
+                      </div>
+                    )}
                   </div>
                   <div className="confirm-actions">
                     <button className="btn-secondary" onClick={() => setShowConfirmModal(false)}>
@@ -1507,7 +1523,7 @@ function App() {
                     <button
                       className="btn-confirm-op"
                       style={{background: cfg.color, boxShadow: `0 4px 14px ${cfg.glowColor}`}}
-                      onClick={() => { setShowConfirmModal(false); setShowPinModal(true); }}
+                      onClick={confirmAndShowPin}
                     >
                       Confirmer
                     </button>
@@ -1649,9 +1665,6 @@ function App() {
         </>
       )}
 
-      <style dangerouslySetInnerHTML={{__html: `
-        @keyframes spin { 100% { transform: rotate(360deg); } }
-      `}} />
     </div>
   );
 }

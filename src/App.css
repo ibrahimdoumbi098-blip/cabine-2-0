@@ -1031,6 +1031,27 @@
   border-color: var(--accent-red);
 }
 
+/* QUICK AMOUNT BUTTONS */
+.quick-amounts {
+  display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px;
+}
+.quick-amount-btn {
+  flex: 1; min-width: 60px;
+  padding: 6px 10px;
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 12px; font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer; transition: all 0.15s ease;
+}
+.quick-amount-btn:hover {
+  background: rgba(99,102,241,0.08);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+  transform: translateY(-1px);
+}
+
 /* RESPONSIVE — Analytics */
 @media (max-width: 768px) {
   .charts-row { grid-template-columns: 1fr; }

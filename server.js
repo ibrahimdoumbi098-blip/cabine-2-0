@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import crypto from 'crypto';
+import bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
 import sqlite3 from 'sqlite3';
 import pg from 'pg';
@@ -34,6 +35,7 @@ function log(level, message, data = {}) {
 }
 
 const app = express();
+app.set('trust proxy', 1); // Render / nginx reverse proxy — required for req.ip and HSTS
 const PORT = process.env.PORT || 3000;
 const IS_PROD = process.env.NODE_ENV === 'production';
 const APP_DOMAIN = process.env.APP_DOMAIN || 'https://cabine.ci';
@@ -43,11 +45,18 @@ const APP_DOMAIN = process.env.APP_DOMAIN || 'https://cabine.ci';
 // ==========================================
 const ALLOWED_ORIGINS = IS_PROD
   ? [APP_DOMAIN, 'https://www.cabine.ci', 'https://cabine.ci']
-  : ['http://localhost:5173', 'http://localhost:3000', APP_DOMAIN];
+  : null; // dev: allow all localhost origins (Vite can use any port 5173-5179)
 
 app.use(cors({
   origin: (origin, cb) => {
-    if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    if (!origin) return cb(null, true); // same-origin / server-to-server
+    if (!IS_PROD) {
+      // Dev: allow any localhost origin regardless of Vite port
+      if (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')) {
+        return cb(null, true);
+      }
+    }
+    if (ALLOWED_ORIGINS && ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
     log('WARN', 'CORS blocked', { origin });
     cb(new Error('Not allowed by CORS'));
   },
@@ -77,7 +86,7 @@ app.use((req, res, next) => {
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
-  res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
+  if (IS_PROD) res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
   res.setHeader('Content-Security-Policy', [
     "default-src 'self' https://cabine.ci",
     "script-src 'self' 'unsafe-inline'",
@@ -192,6 +201,24 @@ async function queryRunUpdate(sql, params = []) {
       sqliteDb.run(sql, params, (err) => err ? reject(err) : resolve());
     });
   }
+}
+
+// ==========================================
+// PIN SECURITY — bcrypt with transparent migration
+// ==========================================
+const BCRYPT_ROUNDS = 10;
+
+async function verifyPin(walletId, storedPin, enteredPin) {
+  const isBcrypt = storedPin.startsWith('$2b$') || storedPin.startsWith('$2a$');
+  const valid = isBcrypt
+    ? await bcrypt.compare(enteredPin, storedPin)
+    : storedPin === enteredPin;
+  // Auto-upgrade plaintext PIN on first successful use
+  if (valid && !isBcrypt) {
+    const hash = await bcrypt.hash(enteredPin, BCRYPT_ROUNDS);
+    await queryRunUpdate('UPDATE wallets SET pin = ? WHERE id = ?', [hash, walletId]).catch(() => {});
+  }
+  return valid;
 }
 
 // ==========================================
@@ -460,6 +487,24 @@ async function pollPayoutStatus(reference, txId, maxAttempts = 10) {
 })();
 
 // ==========================================
+// INPUT VALIDATION HELPERS
+// ==========================================
+const MIN_AMOUNT = 100;       // 100 FCFA minimum
+const MAX_AMOUNT = 5000000;   // 5 000 000 FCFA maximum per transaction
+
+function validateOperationInput(provider, phone, amount, pin) {
+  if (!provider || !['orange','mtn','wave','moov'].includes(provider))
+    return 'Opérateur invalide.';
+  if (!phone || phone.replace(/[\s\-\.+]/g, '').length < 8)
+    return 'Numéro de téléphone invalide.';
+  if (!amount || amount < MIN_AMOUNT || amount > MAX_AMOUNT)
+    return `Montant invalide. Min: ${MIN_AMOUNT.toLocaleString('fr-FR')} FCFA, Max: ${MAX_AMOUNT.toLocaleString('fr-FR')} FCFA.`;
+  if (!pin || !/^\d{4}$/.test(pin))
+    return 'Code PIN invalide (4 chiffres requis).';
+  return null;
+}
+
+// ==========================================
 // API ROUTES
 // ==========================================
 
@@ -483,15 +528,17 @@ app.get('/api/health', async (req, res) => {
     const memUsage = process.memoryUsage();
     const uptime = process.uptime();
     
-    // Get transaction stats
-    const txStats = await queryAll(`
-      SELECT 
-        COUNT(*) as total_tx,
-        COUNT(CASE WHEN status = 'SUCCESS' THEN 1 END) as success_tx,
-        SUM(CASE WHEN status = 'SUCCESS' THEN amount ELSE 0 END) as total_volume
-      FROM transactions 
-      WHERE created_at >= datetime('now', '-24 hours')
-    `);
+    // Get transaction stats (DB-agnostic date syntax)
+    const txStats = await queryAll(isPostgres
+      ? `SELECT COUNT(*) as total_tx,
+           COUNT(CASE WHEN status = 'SUCCESS' THEN 1 END) as success_tx,
+           SUM(CASE WHEN status = 'SUCCESS' THEN amount ELSE 0 END) as total_volume
+         FROM transactions WHERE created_at >= NOW() - INTERVAL '24 hours'`
+      : `SELECT COUNT(*) as total_tx,
+           COUNT(CASE WHEN status = 'SUCCESS' THEN 1 END) as success_tx,
+           SUM(CASE WHEN status = 'SUCCESS' THEN amount ELSE 0 END) as total_volume
+         FROM transactions WHERE created_at >= datetime('now', '-24 hours')`
+    );
     
     res.json({
       status: 'healthy',
@@ -597,8 +644,9 @@ app.put('/api/wallet/pin', async (req, res) => {
   if (!oldPin || !newPin) return res.status(400).json({ error: 'Données invalides.' });
   try {
     const wallet = await queryGet('SELECT pin FROM wallets WHERE id = 1');
-    if (wallet.pin !== oldPin) return res.status(403).json({ error: 'Ancien code PIN incorrect.' });
-    await queryRunUpdate('UPDATE wallets SET pin = ? WHERE id = 1', [newPin]);
+    if (!(await verifyPin(1, wallet.pin, oldPin))) return res.status(403).json({ error: 'Ancien code PIN incorrect.' });
+    const hash = await bcrypt.hash(newPin, BCRYPT_ROUNDS);
+    await queryRunUpdate('UPDATE wallets SET pin = ? WHERE id = 1', [hash]);
     res.json({ message: 'Code PIN mis à jour avec succès.' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -608,13 +656,12 @@ app.post('/api/transfer', rateLimiter, async (req, res) => {
   const { provider, phone, amount, pin } = req.body;
   const numAmount = parseInt(amount, 10);
 
-  if (!provider || !phone || !numAmount || numAmount <= 0)
-    return res.status(400).json({ error: 'Données invalides.' });
-  if (!pin) return res.status(401).json({ error: 'Code PIN requis.' });
+  const validationError = validateOperationInput(provider, phone, numAmount, pin);
+  if (validationError) return res.status(400).json({ error: validationError });
 
   try {
     const wallet = await queryGet('SELECT balance, pin FROM wallets WHERE id = 1');
-    if (wallet.pin !== pin) return res.status(403).json({ error: 'Code PIN incorrect. Transaction refusée.' });
+    if (!(await verifyPin(1, wallet.pin, pin))) return res.status(403).json({ error: 'Code PIN incorrect. Transaction refusée.' });
     if (wallet.balance < numAmount) return res.status(400).json({ error: 'Solde insuffisant.' });
 
     // Débit immédiat
@@ -670,13 +717,12 @@ app.post('/api/retrait', rateLimiter, async (req, res) => {
   const { provider, phone, amount, pin } = req.body;
   const numAmount = parseInt(amount, 10);
 
-  if (!provider || !phone || !numAmount || numAmount <= 0)
-    return res.status(400).json({ error: 'Données invalides.' });
-  if (!pin) return res.status(401).json({ error: 'Code PIN requis.' });
+  const validationError = validateOperationInput(provider, phone, numAmount, pin);
+  if (validationError) return res.status(400).json({ error: validationError });
 
   try {
     const wallet = await queryGet('SELECT balance, pin FROM wallets WHERE id = 1');
-    if (wallet.pin !== pin)
+    if (!(await verifyPin(1, wallet.pin, pin)))
       return res.status(403).json({ error: 'Code PIN incorrect. Opération refusée.' });
 
     // Crédit immédiat du wallet agent
@@ -720,13 +766,12 @@ app.post('/api/airtime', rateLimiter, async (req, res) => {
   const { provider, phone, amount, pin } = req.body;
   const numAmount = parseInt(amount, 10);
 
-  if (!provider || !phone || !numAmount || numAmount <= 0)
-    return res.status(400).json({ error: 'Données invalides.' });
-  if (!pin) return res.status(401).json({ error: 'Code PIN requis.' });
+  const validationError = validateOperationInput(provider, phone, numAmount, pin);
+  if (validationError) return res.status(400).json({ error: validationError });
 
   try {
     const wallet = await queryGet('SELECT balance, pin FROM wallets WHERE id = 1');
-    if (wallet.pin !== pin)
+    if (!(await verifyPin(1, wallet.pin, pin)))
       return res.status(403).json({ error: 'Code PIN incorrect. Opération refusée.' });
     if (wallet.balance < numAmount)
       return res.status(400).json({ error: 'Solde insuffisant.' });
@@ -763,13 +808,14 @@ app.post('/api/internet', rateLimiter, async (req, res) => {
   const { provider, phone, amount, bundle, pin } = req.body;
   const numAmount = parseInt(amount, 10);
 
-  if (!provider || !phone || !numAmount || numAmount <= 0 || !bundle)
-    return res.status(400).json({ error: 'Données invalides.' });
-  if (!pin) return res.status(401).json({ error: 'Code PIN requis.' });
+  if (!bundle || typeof bundle !== 'object' || !bundle.id || !bundle.label)
+    return res.status(400).json({ error: 'Forfait invalide.' });
+  const validationError = validateOperationInput(provider, phone, numAmount, pin);
+  if (validationError) return res.status(400).json({ error: validationError });
 
   try {
     const wallet = await queryGet('SELECT balance, pin FROM wallets WHERE id = 1');
-    if (wallet.pin !== pin)
+    if (!(await verifyPin(1, wallet.pin, pin)))
       return res.status(403).json({ error: 'Code PIN incorrect. Opération refusée.' });
     if (wallet.balance < numAmount)
       return res.status(400).json({ error: 'Solde insuffisant.' });
