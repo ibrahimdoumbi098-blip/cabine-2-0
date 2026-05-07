@@ -6,9 +6,11 @@ import {
   AlertTriangle, Info, X, Download, Send,
   TrendingUp, TrendingDown, BarChart2, Radio, Star, Wifi,
   ChevronLeft, ChevronRight, Copy, Ban, Eye, EyeOff,
-  Activity, Banknote, Target, Layers, Phone
+  Activity, Banknote, Target, Layers, Phone, Monitor, ShieldCheck
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
+import PrintService from './services/PrintService.js';
+import KioskService from './services/KioskService.js';
 import './App.css';
 
 const API_URL = '/api';
@@ -345,6 +347,12 @@ function App() {
   // Balance visibility toggle
   const [balanceHidden, setBalanceHidden] = useState(false);
 
+  // Kiosk mode
+  const [isKiosk, setIsKiosk]             = useState(KioskService.isKiosk());
+  const [kioskPinInput, setKioskPinInput] = useState('');
+  const [kioskPinError, setKioskPinError] = useState('');
+  const [showKioskExit, setShowKioskExit] = useState(false);
+
   // Forfaits opérateurs — chargés depuis /api/bundles
   const [serverBundles, setServerBundles] = useState({ internet: INTERNET_BUNDLES_FALLBACK, calls: {}, lastUpdated: null });
 
@@ -507,7 +515,30 @@ function App() {
   }, [activeTab]);
 
   useEffect(() => {
-    fetchBundles(); // load once on mount — refreshed on page reload
+    fetchBundles();
+    KioskService.restore();
+    const unsub = KioskService.onChange(v => setIsKiosk(v));
+
+    // Capacitor Android back button — navigate back through tabs instead of exiting
+    let backListener = null;
+    const setupBackButton = async () => {
+      try {
+        const { App: CapApp } = await import('@capacitor/app');
+        backListener = await CapApp.addListener('backButton', ({ canGoBack }) => {
+          if (activeTab !== 'dashboard') {
+            setActiveTab('dashboard');
+          } else if (!canGoBack) {
+            CapApp.minimizeApp();
+          }
+        });
+      } catch { /* not in Capacitor env */ }
+    };
+    setupBackButton();
+
+    return () => {
+      unsub();
+      backListener?.remove();
+    };
   }, []);
 
   useEffect(() => {
@@ -688,6 +719,15 @@ function App() {
       } catch (err) {
         console.error("Erreur lors de la préparation du partage", err);
       }
+    }
+  };
+
+  const printReceipt = async () => {
+    if (!receiptData) return;
+    try {
+      await PrintService.print(receiptData, agentName, balance);
+    } catch (err) {
+      addToast('error', 'Impression échouée', err.message || 'Erreur impression');
     }
   };
 
@@ -1354,7 +1394,7 @@ function App() {
             <Radio size={18} style={{marginRight: '8px', verticalAlign: 'middle'}}/>
             Statut GeniusPay
           </div>
-          <div className="card-body" style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '16px'}}>
+          <div className="card-body" style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '16px'}}>
             <div className="profile-info-row" style={{flexDirection: 'column', alignItems: 'center', textAlign: 'center', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '16px'}}>
               <span>Connexion</span>
               <strong style={{color: gpStatus.connected ? 'var(--accent-green)' : 'var(--accent-red)', fontSize: '18px', marginTop: '8px'}}>
@@ -1379,6 +1419,109 @@ function App() {
                 {gpStatus.walletId || 'Auto'}
               </strong>
             </div>
+          </div>
+        </div>
+
+        {/* Kiosk Mode Panel */}
+        <div className="card settings-panel" style={{gridColumn: '1 / -1'}}>
+          <div className="card-header">
+            <Monitor size={18} style={{marginRight: '8px', verticalAlign: 'middle'}}/>
+            Mode Kiosque (Terminal de paiement)
+          </div>
+          <div className="card-body">
+            <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', marginBottom: '20px'}}>
+              <div>
+                <div style={{fontWeight: 600, marginBottom: '4px'}}>
+                  {isKiosk ? '🔒 Mode kiosque actif' : '🔓 Mode kiosque inactif'}
+                </div>
+                <div style={{fontSize: '13px', color: 'var(--text-secondary)'}}>
+                  {isKiosk
+                    ? 'L\'application est verrouillée en plein écran. Les utilisateurs ne peuvent pas quitter.'
+                    : 'Activez ce mode pour bloquer l\'application sur le terminal de paiement.'}
+                </div>
+              </div>
+              <button
+                className={isKiosk ? 'btn-secondary' : 'btn-primary'}
+                style={isKiosk ? {color: 'var(--accent-red)', minWidth: '140px'} : {minWidth: '140px'}}
+                onClick={async () => {
+                  if (isKiosk) {
+                    setShowKioskExit(true);
+                  } else {
+                    await KioskService.enable();
+                    addToast('success', 'Mode kiosque activé', 'Terminal verrouillé. PIN admin requis pour quitter.');
+                  }
+                }}
+              >
+                {isKiosk ? <><ShieldCheck size={15}/> Désactiver</> : <><Monitor size={15}/> Activer</>}
+              </button>
+            </div>
+
+            <div style={{borderTop: '1px solid var(--border-color)', paddingTop: '16px'}}>
+              <div style={{fontWeight: 600, marginBottom: '12px', fontSize: '14px'}}>
+                Changer le PIN administrateur
+              </div>
+              <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', maxWidth: '400px'}}>
+                <div className="form-group" style={{margin: 0}}>
+                  <label>Ancien PIN admin</label>
+                  <input
+                    type="password"
+                    maxLength="6"
+                    placeholder="PIN actuel"
+                    id="kiosk-old-pin"
+                  />
+                </div>
+                <div className="form-group" style={{margin: 0}}>
+                  <label>Nouveau PIN admin</label>
+                  <input
+                    type="password"
+                    maxLength="6"
+                    placeholder="Nouveau PIN"
+                    id="kiosk-new-pin"
+                  />
+                </div>
+              </div>
+              <button
+                className="btn-primary"
+                style={{marginTop: '12px'}}
+                onClick={() => {
+                  const oldP = document.getElementById('kiosk-old-pin')?.value;
+                  const newP = document.getElementById('kiosk-new-pin')?.value;
+                  if (!oldP || !newP) { addToast('warning', 'Champs requis', 'Remplissez les deux champs PIN.'); return; }
+                  if (newP.length < 4) { addToast('warning', 'PIN trop court', 'Le PIN doit contenir au moins 4 chiffres.'); return; }
+                  const ok = KioskService.verifyAdminPin(oldP);
+                  if (!ok) { addToast('error', 'PIN incorrect', 'L\'ancien PIN admin est incorrect.'); return; }
+                  KioskService.setAdminPin(newP);
+                  document.getElementById('kiosk-old-pin').value = '';
+                  document.getElementById('kiosk-new-pin').value = '';
+                  addToast('success', 'PIN mis à jour', 'Nouveau PIN administrateur enregistré.');
+                }}
+              >
+                Mettre à jour le PIN kiosque
+              </button>
+              <p style={{fontSize: '12px', color: 'var(--text-muted)', marginTop: '10px'}}>
+                PIN par défaut: <code>1234</code> — Changez-le avant déploiement sur terminal.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Display preferences */}
+        <div className="card settings-panel" style={{gridColumn: '1 / -1'}}>
+          <div className="card-header">
+            Préférences d'affichage
+          </div>
+          <div className="card-body" style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px'}}>
+            <div>
+              <div style={{fontWeight: 600, marginBottom: '4px'}}>Thème sombre</div>
+              <div style={{fontSize: '13px', color: 'var(--text-secondary)'}}>Réduit la fatigue visuelle en conditions de faible luminosité</div>
+            </div>
+            <button
+              className={darkMode ? 'btn-primary' : 'btn-secondary'}
+              style={{minWidth: '120px'}}
+              onClick={() => setDarkMode(d => !d)}
+            >
+              {darkMode ? '☀️ Mode clair' : '🌙 Mode sombre'}
+            </button>
           </div>
         </div>
       </div>
@@ -1846,7 +1989,10 @@ function App() {
                   <button className="btn-secondary" onClick={() => setReceiptData(null)}>
                     Fermer
                   </button>
-                  <button className="btn-primary" onClick={downloadReceipt}>
+                  <button className="btn-primary" onClick={printReceipt}>
+                    <Printer size={16} /> Imprimer
+                  </button>
+                  <button className="btn-secondary" onClick={downloadReceipt} style={{color: 'var(--accent-primary)'}}>
                     <Download size={16} /> Télécharger
                   </button>
                   <button className="btn-secondary" onClick={shareReceipt} style={{color: 'var(--accent-blue)'}}>
@@ -1859,6 +2005,107 @@ function App() {
 
           {/* Toast Notifications */}
           <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+
+          {/* Bottom Navigation — mobile only */}
+          <nav className="bottom-nav">
+            <button
+              className={`bottom-nav-item${activeTab === 'dashboard' ? ' active' : ''}`}
+              onClick={() => setActiveTab('dashboard')}
+            >
+              <div className="bnav-icon"><LayoutDashboard size={20} /></div>
+              <span>Accueil</span>
+            </button>
+            <button
+              className={`bottom-nav-item${activeTab === 'transactions' ? ' active' : ''}`}
+              onClick={() => setActiveTab('transactions')}
+            >
+              <div className="bnav-icon"><History size={20} /></div>
+              <span>Historique</span>
+            </button>
+            <button
+              className="bottom-nav-item bnav-cta"
+              onClick={() => { setActiveTab('dashboard'); setActiveOperation('transfer'); }}
+            >
+              <div className="bnav-icon"><Zap size={22} /></div>
+              <span>Action</span>
+            </button>
+            <button
+              className={`bottom-nav-item${activeTab === 'analytics' ? ' active' : ''}`}
+              onClick={() => setActiveTab('analytics')}
+            >
+              <div className="bnav-icon"><BarChart2 size={20} /></div>
+              <span>Stats</span>
+            </button>
+            <button
+              className={`bottom-nav-item${activeTab === 'settings' ? ' active' : ''}`}
+              onClick={() => setActiveTab('settings')}
+            >
+              <div className="bnav-icon"><Settings size={20} /></div>
+              <span>Réglages</span>
+            </button>
+          </nav>
+
+          {/* Kiosk exit button — visible only in kiosk mode */}
+          {isKiosk && (
+            <button
+              className="kiosk-exit-btn"
+              onClick={() => setShowKioskExit(true)}
+              title="Quitter le mode kiosque"
+            >
+              <ShieldCheck size={18} />
+            </button>
+          )}
+
+          {/* Kiosk exit PIN modal */}
+          {showKioskExit && (
+            <div className="modal-overlay" style={{zIndex: 9999}}>
+              <div className="confirm-modal" style={{'--confirm-color': '#ef4444'}}>
+                <div className="confirm-header">
+                  <ShieldCheck size={22} />
+                  <h3>Mode administrateur</h3>
+                </div>
+                <p style={{color: 'var(--text-secondary)', fontSize: '14px', marginBottom: '16px'}}>
+                  Entrez le PIN administrateur pour quitter le mode kiosque.
+                </p>
+                <input
+                  type="password"
+                  maxLength="6"
+                  placeholder="PIN admin"
+                  value={kioskPinInput}
+                  onChange={e => { setKioskPinInput(e.target.value); setKioskPinError(''); }}
+                  style={{marginBottom: '8px'}}
+                  autoFocus
+                />
+                {kioskPinError && (
+                  <p style={{color: 'var(--accent-red)', fontSize: '13px', marginBottom: '12px'}}>
+                    {kioskPinError}
+                  </p>
+                )}
+                <div className="confirm-actions">
+                  <button className="btn-secondary" onClick={() => { setShowKioskExit(false); setKioskPinInput(''); setKioskPinError(''); }}>
+                    Annuler
+                  </button>
+                  <button
+                    className="btn-primary"
+                    style={{background: '#ef4444'}}
+                    onClick={async () => {
+                      const ok = await KioskService.disable(kioskPinInput);
+                      if (ok) {
+                        setShowKioskExit(false);
+                        setKioskPinInput('');
+                        setKioskPinError('');
+                        addToast('success', 'Mode kiosque désactivé', 'Accès administrateur accordé.');
+                      } else {
+                        setKioskPinError('PIN incorrect. Réessayez.');
+                      }
+                    }}
+                  >
+                    Confirmer
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           <style dangerouslySetInnerHTML={{__html: `
             @keyframes spin { 100% { transform: rotate(360deg); } }

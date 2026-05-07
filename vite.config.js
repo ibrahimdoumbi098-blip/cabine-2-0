@@ -11,5 +11,20 @@ export default defineConfig({
         changeOrigin: true
       }
     }
+  },
+  build: {
+    rollupOptions: {
+      // Capacitor packages are only available in native APK builds — not in web/PWA bundles
+      external: [
+        '@capacitor/app',
+        '@capacitor/core',
+        '@capacitor/haptics',
+        '@capacitor/keyboard',
+        '@capacitor/network',
+        '@capacitor/share',
+        '@capacitor/splash-screen',
+        '@capacitor/status-bar',
+      ]
+    }
   }
 })

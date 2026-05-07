@@ -714,41 +714,247 @@
   display: flex; gap: 10px; margin-top: 20px;
 }
 
-/* ===== RESPONSIVE ===== */
-@media (max-width: 768px) {
-  .app-container { flex-direction: column; overflow-y: auto; height: 100dvh; }
-  .mobile-header { display: flex; position: sticky; top: 0; z-index: 40; }
-  .sidebar {
-    position: fixed; top: 0; left: 0; height: 100dvh;
-    width: 260px !important; transform: translateX(-100%);
-    box-shadow: 4px 0 24px rgba(0,0,0,0.12);
-  }
-  .sidebar.open { transform: translateX(0); }
-  .sidebar-toggle-btn { display: none; }
-  .desktop-logo { display: flex; }
-  .main-content { padding: 16px; overflow-y: visible; }
-  .dashboard-header { flex-direction: column; align-items: stretch; gap: 12px; margin-bottom: 16px; }
-  .header-title h1, .header-left h1 { font-size: 20px; }
-  .master-balance { text-align: left; padding: 14px 16px; min-width: unset; }
-  .balance-amount { font-size: 22px; }
-  .balance-header-row { margin-bottom: 4px; }
-  .action-nav { gap: 4px; padding: 4px; }
-  .action-tab { padding: 10px 6px; gap: 4px; }
-  .action-tab .tab-icon { width: 30px; height: 30px; }
-  .action-tab span { font-size: 11px; }
-  .working-area { grid-template-columns: 1fr; gap: 14px; }
-  .card-header { padding: 14px 16px; font-size: 14px; }
-  .card-body { padding: 16px; }
-  .settings-grid { grid-template-columns: 1fr; }
-  .toast-container { top: auto; bottom: 16px; right: 8px; left: 8px; max-width: none; }
-  .receipt-paper { padding: 24px 18px; }
-  .bundle-grid { grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 8px; }
-  .bundle-size { font-size: 15px; }
+/* =============================================
+   BOTTOM NAV — mobile uniquement
+   ============================================= */
+.bottom-nav {
+  display: none; /* visible seulement sur mobile via media query */
 }
 
+/* =============================================
+   RESPONSIVE MOBILE ≤768px
+   ============================================= */
+@media (max-width: 768px) {
+  /* ── Conteneur principal ── */
+  .app-container {
+    flex-direction: column;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  /* ── Masquer la sidebar desktop, le header mobile, le floating btn ── */
+  .sidebar           { display: none !important; }
+  .sidebar-float-btn { display: none !important; }
+  .mobile-header     { display: none; }
+
+  /* ── Zone de contenu scrollable, avec espace pour la bottom nav ── */
+  .main-content {
+    flex: 1;
+    padding: 16px 14px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-bottom: calc(72px + var(--safe-bottom, 0px));
+  }
+
+  /* ── Header dashboard mobile ── */
+  .dashboard-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .header-left h1, .header-title h1 { font-size: 20px; }
+  .header-left p,  .header-title p  { font-size: 13px; }
+  .status-badges { gap: 5px; }
+  .status-pill   { font-size: 10px; padding: 3px 8px; }
+
+  /* ── Balance card mobile ── */
+  .master-balance {
+    text-align: left;
+    padding: 14px 16px;
+    min-width: unset;
+    border-radius: 14px;
+  }
+  .balance-amount { font-size: 24px; }
+
+  /* ── Analytics grid: 2×2 sur mobile ── */
+  .analytics-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .analytics-card { padding: 14px 12px; gap: 10px; }
+  .analytics-icon { width: 36px; height: 36px; }
+  .analytics-content h3 { font-size: 18px; }
+  .analytics-content p  { font-size: 10px; }
+  .analytics-trend { font-size: 9px; }
+
+  /* ── Action tabs ── */
+  .action-nav {
+    gap: 3px; padding: 4px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .action-nav::-webkit-scrollbar { display: none; }
+  .action-tab { padding: 10px 8px; gap: 4px; min-width: 72px; }
+  .action-tab .tab-icon { width: 28px; height: 28px; }
+  .action-tab span { font-size: 10px; white-space: nowrap; }
+
+  /* ── Zone de travail: 1 colonne ── */
+  .working-area { grid-template-columns: 1fr; gap: 12px; }
+  .card-header  { padding: 14px 16px; font-size: 14px; }
+  .card-body    { padding: 16px; }
+
+  /* ── Provider grid: 2 colonnes fixes ── */
+  .provider-grid { grid-template-columns: 1fr 1fr; }
+  .provider-btn  { padding: 10px 10px; font-size: 13px; }
+
+  /* ── Inputs plus grands pour le touch ── */
+  input, select { padding: 14px 16px; font-size: 16px; }
+  .phone-input  { height: 52px; font-size: 16px; }
+  .amount-input input { height: 60px; font-size: 24px; }
+
+  /* ── Quick amounts ── */
+  .quick-amounts { gap: 6px; }
+  .quick-amount-btn {
+    padding: 8px 12px; font-size: 12px;
+    min-height: 36px;
+  }
+
+  /* ── Submit button ── */
+  .submit-btn { padding: 16px; font-size: 16px; min-height: 52px; }
+
+  /* ── Historique tx mobile ── */
+  .tx-body    { max-height: none; }
+  .tx-item    { padding: 14px 0; }
+  .tx-logo    { width: 40px; height: 40px; }
+  .tx-details p { font-size: 14px; }
+  .tx-details span { font-size: 12px; }
+  .tx-amount p { font-size: 15px; }
+
+  /* ── Paramètres ── */
+  .settings-grid { grid-template-columns: 1fr; }
+
+  /* ── Toast ── */
+  .toast-container {
+    top: auto; bottom: calc(80px + var(--safe-bottom, 0px));
+    right: 8px; left: 8px; max-width: none;
+  }
+
+  /* ── Reçu ── */
+  .receipt-paper { padding: 24px 16px; }
+
+  /* ── Forfaits ── */
+  .bundle-grid { grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 8px; }
+  .bundle-size { font-size: 14px; }
+  .bundle-card { padding: 10px 8px 8px; }
+
+  /* ── Analytics page ── */
+  .analytics-kpi-row { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .charts-row        { grid-template-columns: 1fr; }
+  .kpi-value         { font-size: 22px; }
+
+  /* ── Banners ── */
+  .offline-banner, .connecting-banner { font-size: 12px; padding: 6px 12px; }
+}
+
+/* =============================================
+   BOTTOM NAV — affichée seulement sur mobile
+   ============================================= */
+@media (max-width: 768px) {
+  .bottom-nav {
+    display: flex;
+    position: fixed; bottom: 0; left: 0; right: 0;
+    height: calc(60px + var(--safe-bottom, 0px));
+    padding-bottom: var(--safe-bottom, 0px);
+    background: var(--bg-white);
+    border-top: 1px solid var(--border-color);
+    z-index: 100;
+    box-shadow: 0 -4px 20px rgba(0,0,0,0.08);
+  }
+  .bottom-nav-item {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 3px; padding: 8px 4px;
+    color: var(--text-muted); font-size: 10px; font-weight: 600;
+    cursor: pointer; transition: all var(--transition-fast);
+    border: none; background: transparent;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .bottom-nav-item.active {
+    color: var(--accent-primary);
+  }
+  .bottom-nav-item.active .bnav-icon {
+    background: var(--accent-primary-light);
+    border-radius: 10px;
+  }
+  .bnav-icon {
+    width: 36px; height: 28px;
+    display: flex; align-items: center; justify-content: center;
+    transition: all var(--transition-fast);
+  }
+  /* Bouton central (transaction rapide) — plus grand */
+  .bottom-nav-item.bnav-cta {
+    flex: 0 0 64px;
+  }
+  .bottom-nav-item.bnav-cta .bnav-icon {
+    width: 46px; height: 46px; border-radius: 14px;
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-purple));
+    box-shadow: 0 4px 14px var(--accent-primary-glow);
+    color: white; margin-top: -14px;
+  }
+  .bottom-nav-item.bnav-cta.active .bnav-icon {
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-purple));
+  }
+}
+
+/* =============================================
+   PETIT TÉLÉPHONE ≤380px
+   ============================================= */
 @media (max-width: 380px) {
-  .provider-grid { grid-template-columns: 1fr; }
-  .balance-amount { font-size: 20px; }
+  .analytics-grid      { grid-template-columns: 1fr 1fr; }
+  .provider-grid       { grid-template-columns: 1fr 1fr; }
+  .balance-amount      { font-size: 20px; }
+  .analytics-content h3{ font-size: 16px; }
+}
+
+/* =============================================
+   TABLETTE / TERMINAL POS ≤1024px
+   ============================================= */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .sidebar { width: 64px; padding: 16px 8px; }
+  .sidebar .logo-area span,
+  .sidebar .nav-item span,
+  .sidebar .agent-info { display: none; }
+  .sidebar .nav-item { justify-content: center; padding: 12px; }
+  .agent-card { padding: 10px 6px; justify-content: center; }
+  .main-content { padding: 20px 18px; }
+  .working-area { grid-template-columns: 1fr 300px; }
+  .analytics-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* =============================================
+   MODE KIOSQUE (terminal dédié)
+   ============================================= */
+html.kiosk body {
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+html.kiosk .app-container {
+  height: 100dvh;
+  overflow: hidden;
+}
+html.kiosk .bottom-nav { display: none; }
+html.kiosk .kiosk-exit-btn {
+  position: fixed; top: 12px; right: 12px;
+  z-index: 9999; opacity: 0.3;
+  width: 32px; height: 32px;
+}
+html.kiosk .kiosk-exit-btn:active { opacity: 1; }
+
+/* =============================================
+   CSS D'IMPRESSION (window.print)
+   ============================================= */
+@media print {
+  body > *:not(.print-receipt) { display: none !important; }
+  .print-receipt {
+    display: block !important;
+    width: 58mm; margin: 0; padding: 0;
+  }
+  .app-container, .sidebar, .bottom-nav,
+  .toast-container, .modal-overlay { display: none !important; }
 }
 
 /* ========================================

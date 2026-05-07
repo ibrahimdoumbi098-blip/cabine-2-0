@@ -1,0 +1,19 @@
+// Coller ce contenu dans android/app/src/main/java/ci/cabine/app/MainActivity.java
+// après `npx cap add android`
+
+package ci.cabine.app;
+
+import android.os.Bundle;
+import com.getcapacitor.BridgeActivity;
+import ci.cabine.app.plugins.SunmiPrinterPlugin;
+import ci.cabine.app.plugins.KioskPlugin;
+
+public class MainActivity extends BridgeActivity {
+    @Override
+    public void onCreate(Bundle savedInstanceState) {
+        // Enregistrer les plugins natifs
+        registerPlugin(SunmiPrinterPlugin.class);
+        registerPlugin(KioskPlugin.class);
+        super.onCreate(savedInstanceState);
+    }
+}
