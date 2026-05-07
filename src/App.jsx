@@ -5,7 +5,8 @@ import {
   XCircle, RefreshCw, Menu, Delete, Printer, Share2, Lock,
   AlertTriangle, Info, X, Download, Send,
   TrendingUp, TrendingDown, BarChart2, Radio, Star, Wifi,
-  ChevronLeft, ChevronRight, Copy, Ban
+  ChevronLeft, ChevronRight, Copy, Ban, Eye, EyeOff,
+  Activity, DollarSign, Target, Layers
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import './App.css';
@@ -339,6 +340,9 @@ function App() {
 
   // GeniusPay Status
   const [gpStatus, setGpStatus] = useState({ connected: false, mode: 'sandbox', hasKeys: false });
+
+  // Balance visibility toggle
+  const [balanceHidden, setBalanceHidden] = useState(false);
 
   const avatarInitials = agentName
     .split(' ')
@@ -724,64 +728,107 @@ function App() {
   // VIEWS
   const detectedOp = detectOperator(phone);
 
-  const renderDashboard = () => (
+  const renderDashboard = () => {
+    const successTx = transactions.filter(t => t.status === 'SUCCESS');
+    const successCount = successTx.length;
+    const totalVolume = successTx.reduce((s, t) => s + t.amount, 0);
+    const avgAmount = successCount > 0 ? Math.round(totalVolume / successCount) : null;
+    const successRate = Math.round((successCount / Math.max(transactions.length, 1)) * 100) || 0;
+    const gpMode = gpStatus.connected
+      ? (gpStatus.mode === 'live' ? 'live' : 'sandbox')
+      : gpStatus.hasKeys ? 'warn' : 'off';
+    const gpLabel = gpStatus.connected
+      ? (gpStatus.mode === 'live' ? 'Live' : 'Sandbox')
+      : gpStatus.hasKeys ? 'Simulateur' : 'Hors ligne';
+
+    return (
     <>
+      {/* ── PREMIUM DASHBOARD HEADER ── */}
       <div className="dashboard-header animate-in">
-        <div className="header-title">
+        <div className="header-left">
           <h1>{getGreeting()}, {agentName.split(' ')[0]} 👋</h1>
           <p>Prêt à traiter les transactions d'aujourd'hui ?</p>
-          <div className="gp-badge">
-            <span className={`gp-dot ${gpStatus.connected ? 'on' : gpStatus.hasKeys ? 'warn' : 'off'}`}/>
-            {gpStatus.connected
-              ? (gpStatus.mode === 'live' ? 'GeniusPay Live' : 'GeniusPay Sandbox')
-              : gpStatus.hasKeys
-                ? 'Simulateur actif'
-                : 'API hors ligne'}
+          <div className="status-badges">
+            <span className={`status-pill gp-${gpMode}`}>
+              <span className="status-dot"/>
+              GeniusPay {gpLabel}
+            </span>
+            {gpStatus.walletId && (
+              <span className="status-pill account">
+                <Layers size={10}/> {gpStatus.walletId}
+              </span>
+            )}
+            <span className="status-pill account">
+              <Zap size={10}/> CAB-{String(balance).slice(-4).padStart(4,'0')}
+            </span>
           </div>
         </div>
+
         <div className="master-balance">
-          <div className="label">Solde Flotte</div>
-          <div className="amount">
-            {new Intl.NumberFormat('fr-FR').format(balance)}
-            <span className="currency-label">FCFA</span>
+          <div className="balance-header-row">
+            <div className="balance-label">SOLDE FLOTTE</div>
+            <button
+              className="balance-eye-btn"
+              onClick={() => setBalanceHidden(h => !h)}
+              title={balanceHidden ? 'Afficher le solde' : 'Masquer le solde'}
+            >
+              {balanceHidden ? <EyeOff size={14}/> : <Eye size={14}/>}
+            </button>
+          </div>
+          <div className="balance-amount">
+            {balanceHidden
+              ? <span className="balance-masked">• • • • • •</span>
+              : <>{new Intl.NumberFormat('fr-FR').format(balance)}<span className="currency-label">FCFA</span></>
+            }
+          </div>
+          <div className="balance-footer-row">
+            <Activity size={11}/>
+            <span>{transactions.length > 0 ? `${transactions.length} tx aujourd'hui` : 'Aucune activité'}</span>
           </div>
         </div>
       </div>
 
-      {/* Analytics Cards */}
+      {/* ── ANALYTICS CARDS ── */}
       <div className="analytics-grid animate-in" style={{animationDelay: '0.02s'}}>
-        <div className="analytics-card">
-          <div className="analytics-icon">📊</div>
+        <div className="analytics-card ac-green">
+          <div className="analytics-icon ac-icon-green"><CheckCircle2 size={22}/></div>
           <div className="analytics-content">
-            <h3>{transactions.filter(t => t.status === 'SUCCESS').length}</h3>
             <p>Transactions réussies</p>
+            <h3>{successCount}</h3>
+            <div className="analytics-trend trend-up">
+              <TrendingUp size={11}/><span>Aujourd'hui</span>
+            </div>
           </div>
         </div>
-        <div className="analytics-card">
-          <div className="analytics-icon">💰</div>
+        <div className="analytics-card ac-blue">
+          <div className="analytics-icon ac-icon-blue"><DollarSign size={22}/></div>
           <div className="analytics-content">
-            <h3>{new Intl.NumberFormat('fr-FR').format(transactions.filter(t => t.status === 'SUCCESS').reduce((sum, t) => sum + t.amount, 0))}</h3>
             <p>Volume total (FCFA)</p>
+            <h3>{new Intl.NumberFormat('fr-FR').format(totalVolume)}</h3>
+            <div className="analytics-trend trend-up">
+              <TrendingUp size={11}/><span>Cumulé</span>
+            </div>
           </div>
         </div>
-        <div className="analytics-card">
-          <div className="analytics-icon">⚡</div>
+        <div className="analytics-card ac-yellow">
+          <div className="analytics-icon ac-icon-yellow"><Zap size={22}/></div>
           <div className="analytics-content">
-            {(() => {
-              const successTx = transactions.filter(t => t.status === 'SUCCESS');
-              const avg = successTx.length > 0
-                ? Math.round(successTx.reduce((s,t) => s + t.amount, 0) / successTx.length)
-                : null;
-              return <h3>{avg !== null ? new Intl.NumberFormat('fr-FR').format(avg) : '—'}</h3>;
-            })()}
             <p>Montant moyen</p>
+            <h3>{avgAmount !== null ? new Intl.NumberFormat('fr-FR').format(avgAmount) : '—'}</h3>
+            <div className="analytics-trend trend-neutral">
+              <Activity size={11}/><span>Par transaction</span>
+            </div>
           </div>
         </div>
-        <div className="analytics-card">
-          <div className="analytics-icon">🎯</div>
+        <div className="analytics-card ac-purple">
+          <div className="analytics-icon ac-icon-purple"><Target size={22}/></div>
           <div className="analytics-content">
-            <h3>{Math.round((transactions.filter(t => t.status === 'SUCCESS').length / Math.max(transactions.length, 1)) * 100) || 0}%</h3>
             <p>Taux de succès</p>
+            <h3>{successRate}%</h3>
+            <div className={`analytics-trend ${successRate >= 80 ? 'trend-up' : successRate >= 50 ? 'trend-neutral' : 'trend-down'}`}>
+              {successRate >= 80 ? <TrendingUp size={11}/> : successRate >= 50 ? <Activity size={11}/> : <TrendingDown size={11}/>}
+              <span>{successRate >= 80 ? 'Excellent' : successRate >= 50 ? 'Correct' : 'À améliorer'}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -1031,6 +1078,7 @@ function App() {
       </div>
     </>
   );
+  };
 
   const renderTransactions = () => (
     <div className="animate-in">
