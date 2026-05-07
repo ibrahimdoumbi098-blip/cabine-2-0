@@ -261,20 +261,22 @@
   border-left: 3px solid transparent;
 }
 .analytics-card:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
-.ac-green { border-left-color: var(--accent-green); }
-.ac-blue  { border-left-color: #3b82f6; }
-.ac-yellow{ border-left-color: var(--accent-yellow); }
-.ac-purple{ border-left-color: var(--accent-purple); }
+.ac-green  { border-left-color: var(--accent-green); }
+.ac-blue   { border-left-color: #3b82f6; }
+.ac-yellow { border-left-color: var(--accent-yellow); }
+.ac-purple { border-left-color: var(--accent-purple); }
+.ac-red    { border-left-color: var(--accent-red); }
 
 .analytics-icon {
   width: 44px; height: 44px; border-radius: var(--radius-md);
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
 }
-.ac-icon-green  { background: rgba(16,185,129,0.1); color: var(--accent-green); }
-.ac-icon-blue   { background: rgba(59,130,246,0.1); color: #3b82f6; }
-.ac-icon-yellow { background: rgba(234,179,8,0.1); color: #b45309; }
-.ac-icon-purple { background: rgba(139,92,246,0.1); color: var(--accent-purple); }
+.ac-icon-green  { background: rgba(16,185,129,0.1);  color: var(--accent-green); }
+.ac-icon-blue   { background: rgba(59,130,246,0.1);  color: #3b82f6; }
+.ac-icon-yellow { background: rgba(234,179,8,0.1);   color: #b45309; }
+.ac-icon-purple { background: rgba(139,92,246,0.1);  color: var(--accent-purple); }
+.ac-icon-red    { background: rgba(239,68,68,0.08);  color: var(--accent-red); }
 
 .analytics-content { flex: 1; min-width: 0; }
 .analytics-content p {

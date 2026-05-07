@@ -745,10 +745,7 @@ function App() {
   const detectedOp = detectOperator(phone);
 
   const renderDashboard = () => {
-    const successTx = transactions.filter(t => t.status === 'SUCCESS');
-    const successCount = successTx.length;
-    const totalVolume = successTx.reduce((s, t) => s + t.amount, 0);
-    const avgAmount = successCount > 0 ? Math.round(totalVolume / successCount) : null;
+    const successCount = transactions.filter(t => t.status === 'SUCCESS').length;
     const successRate = Math.round((successCount / Math.max(transactions.length, 1)) * 100) || 0;
     const gpMode = gpStatus.connected
       ? (gpStatus.mode === 'live' ? 'live' : 'sandbox')
@@ -804,58 +801,74 @@ function App() {
         </div>
       </div>
 
-      {/* ── ANALYTICS CARDS — cliquables ── */}
-      <div className="analytics-grid animate-in" style={{animationDelay: '0.02s'}}>
-        <div className="analytics-card ac-green analytics-card--nav"
-          onClick={() => { setActiveTab('transactions'); setTransactionStatus('SUCCESS'); }}
-          title="Voir les transactions réussies">
-          <div className="analytics-icon ac-icon-green"><CheckCircle2 size={22}/></div>
-          <div className="analytics-content">
-            <p>Transactions réussies</p>
-            <h3>{successCount}</h3>
-            <div className="analytics-trend trend-up">
-              <TrendingUp size={11}/><span>Voir le détail →</span>
-            </div>
+      {/* ── 4 CARTES STATUT — chacune unique ── */}
+      {(() => {
+        const pendingCount = transactions.filter(t => t.status === 'PENDING' || t.status === 'PROCESSING').length;
+        const failedCount  = transactions.filter(t => t.status === 'FAILED').length;
+        const cards = [
+          {
+            color: 'ac-green', iconColor: 'ac-icon-green',
+            icon: <CheckCircle2 size={22}/>,
+            label: 'Réussies',
+            value: successCount,
+            trend: 'trend-up',
+            trendIcon: <TrendingUp size={11}/>,
+            trendLabel: 'Filtrer →',
+            onClick: () => { setActiveTab('transactions'); setTransactionStatus('SUCCESS'); },
+            title: 'Voir les transactions réussies',
+          },
+          {
+            color: 'ac-yellow', iconColor: 'ac-icon-yellow',
+            icon: <Clock size={22}/>,
+            label: 'En attente',
+            value: pendingCount,
+            trend: pendingCount > 0 ? 'trend-neutral' : 'trend-up',
+            trendIcon: <Activity size={11}/>,
+            trendLabel: 'Filtrer →',
+            onClick: () => { setActiveTab('transactions'); setTransactionStatus('PENDING'); },
+            title: 'Voir les transactions en attente',
+          },
+          {
+            color: 'ac-red', iconColor: 'ac-icon-red',
+            icon: <XCircle size={22}/>,
+            label: 'Échouées',
+            value: failedCount,
+            trend: failedCount > 0 ? 'trend-down' : 'trend-up',
+            trendIcon: failedCount > 0 ? <TrendingDown size={11}/> : <CheckCircle2 size={11}/>,
+            trendLabel: failedCount > 0 ? 'Filtrer →' : 'Aucun échec',
+            onClick: () => { setActiveTab('transactions'); setTransactionStatus('FAILED'); },
+            title: 'Voir les transactions échouées',
+          },
+          {
+            color: 'ac-purple', iconColor: 'ac-icon-purple',
+            icon: <Target size={22}/>,
+            label: 'Taux de succès',
+            value: `${successRate}%`,
+            trend: successRate >= 80 ? 'trend-up' : successRate >= 50 ? 'trend-neutral' : 'trend-down',
+            trendIcon: successRate >= 80 ? <TrendingUp size={11}/> : successRate >= 50 ? <Activity size={11}/> : <TrendingDown size={11}/>,
+            trendLabel: successRate >= 80 ? 'Excellent' : successRate >= 50 ? 'Correct' : 'Voir graphes →',
+            onClick: () => setActiveTab('analytics'),
+            title: 'Voir les analytiques détaillées',
+          },
+        ];
+        return (
+          <div className="analytics-grid animate-in" style={{animationDelay: '0.02s'}}>
+            {cards.map((c, i) => (
+              <div key={i} className={`analytics-card ${c.color} analytics-card--nav`}
+                onClick={c.onClick} title={c.title}>
+                <div className={`analytics-icon ${c.iconColor}`}>{c.icon}</div>
+                <div className="analytics-content">
+                  <p>{c.label}</p>
+                  <h3>{c.value}</h3>
+                  <div className={`analytics-trend ${c.trend}`}>
+                    {c.trendIcon}<span>{c.trendLabel}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
-        </div>
-        <div className="analytics-card ac-blue analytics-card--nav"
-          onClick={() => { setActiveTab('transactions'); setTransactionStatus('all'); }}
-          title="Voir toutes les transactions">
-          <div className="analytics-icon ac-icon-blue"><Banknote size={22}/></div>
-          <div className="analytics-content">
-            <p>Volume total (FCFA)</p>
-            <h3>{new Intl.NumberFormat('fr-FR').format(totalVolume)}</h3>
-            <div className="analytics-trend trend-up">
-              <TrendingUp size={11}/><span>Voir le détail →</span>
-            </div>
-          </div>
-        </div>
-        <div className="analytics-card ac-yellow analytics-card--nav"
-          onClick={() => setActiveTab('analytics')}
-          title="Voir les analytiques">
-          <div className="analytics-icon ac-icon-yellow"><Activity size={22}/></div>
-          <div className="analytics-content">
-            <p>Montant moyen</p>
-            <h3>{avgAmount !== null ? new Intl.NumberFormat('fr-FR').format(avgAmount) : '—'}</h3>
-            <div className="analytics-trend trend-neutral">
-              <BarChart2 size={11}/><span>Voir les graphes →</span>
-            </div>
-          </div>
-        </div>
-        <div className="analytics-card ac-purple analytics-card--nav"
-          onClick={() => setActiveTab('analytics')}
-          title="Voir les analytiques">
-          <div className="analytics-icon ac-icon-purple"><Target size={22}/></div>
-          <div className="analytics-content">
-            <p>Taux de succès</p>
-            <h3>{successRate}%</h3>
-            <div className={`analytics-trend ${successRate >= 80 ? 'trend-up' : successRate >= 50 ? 'trend-neutral' : 'trend-down'}`}>
-              {successRate >= 80 ? <TrendingUp size={11}/> : successRate >= 50 ? <Activity size={11}/> : <TrendingDown size={11}/>}
-              <span>{successRate >= 80 ? 'Excellent' : successRate >= 50 ? 'Correct' : 'Voir les graphes →'}</span>
-            </div>
-          </div>
-        </div>
-      </div>
+        );
+      })()}
 
       <div className="action-nav animate-in" style={{animationDelay: '0.05s'}}>
         {[
@@ -1166,7 +1179,7 @@ function App() {
       </div>
       <div className="card" style={{minHeight: '60vh'}}>
         <div className="card-header">
-          Transactions (Ledger)
+          Historique des transactions
           <span style={{fontSize: '12px', color: 'var(--accent-primary)', cursor: 'pointer'}} onClick={fetchData}><RefreshCw size={14} style={{marginRight: '5px', verticalAlign:'middle'}}/> Actualiser</span>
         </div>
         <div className="filter-panel">
