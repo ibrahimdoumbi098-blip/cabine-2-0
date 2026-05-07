@@ -45,6 +45,14 @@
   animation: shimmer 2s ease-in-out infinite;
 }
 
+/* ===== APP CONTAINER ===== */
+.app-container {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg-main);
+}
+
 /* ===== SIDEBAR ===== */
 .sidebar {
   width: 250px;
@@ -286,6 +294,42 @@
 .trend-up   { background: rgba(16,185,129,0.1); color: var(--accent-green); }
 .trend-down { background: rgba(239,68,68,0.08); color: var(--accent-red); }
 .trend-neutral { background: rgba(99,102,241,0.08); color: var(--accent-primary); }
+
+/* Analytics cards — navigables */
+.analytics-card--nav {
+  cursor: pointer;
+}
+.analytics-card--nav:hover .analytics-trend {
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.analytics-card--nav:active { transform: translateY(0) scale(0.98); }
+
+/* Bundle header row */
+.bundle-header-row {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 6px;
+}
+.bundle-header-row label { margin-bottom: 0; }
+.bundle-updated {
+  font-size: 10px; color: var(--text-muted); font-weight: 500;
+  font-style: italic;
+}
+
+/* Call packages */
+.call-card .bundle-size {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+}
+.call-tag {
+  background: rgba(245,158,11,0.12); color: var(--accent-yellow);
+}
+.bundle-note {
+  font-size: 9px; color: var(--text-muted); margin-top: 3px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.bundle-or-divider {
+  text-align: center; margin: 14px 0 4px;
+  font-size: 11px; color: var(--text-muted); font-weight: 500;
+}
 .action-tab {
   flex: 1; display: flex; flex-direction: column;
   align-items: center; gap: 6px; padding: 12px 8px;
@@ -702,7 +746,7 @@
 
 @media (max-width: 380px) {
   .provider-grid { grid-template-columns: 1fr; }
-  .master-balance .amount { font-size: 20px; }
+  .balance-amount { font-size: 20px; }
 }
 
 /* ========================================

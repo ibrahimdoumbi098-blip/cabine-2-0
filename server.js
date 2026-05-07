@@ -133,6 +133,127 @@ setInterval(() => {
 }, 120000);
 
 // ==========================================
+// FORFAITS OPÉRATEURS CI — source unique côté serveur
+// Mise à jour ici = mis à jour pour tous les clients sans rebuild frontend
+// Dernière vérification: 2026-05-07 (sources: orange.ci, mtn.ci, moov-africa.ci)
+// ==========================================
+const OPERATOR_BUNDLES = {
+  lastUpdated: '2026-05-07',
+  internet: {
+    orange: {
+      daily: [
+        { id: 'o-d-40m',  label: '40 Mo',  price: 100,  validity: '24h',     tag: null },
+        { id: 'o-d-100m', label: '100 Mo', price: 200,  validity: '24h',     tag: null },
+        { id: 'o-d-250m', label: '250 Mo', price: 300,  validity: '24h',     tag: null },
+        { id: 'o-d-500m', label: '500 Mo', price: 500,  validity: '24h',     tag: null },
+        { id: 'o-d-1g',   label: '1 Go',   price: 700,  validity: '24h',     tag: 'Populaire' },
+      ],
+      weekly: [
+        { id: 'o-w-500m', label: '500 Mo', price: 500,  validity: '7 jours', tag: null },
+        { id: 'o-w-1g5',  label: '1,5 Go', price: 1000, validity: '7 jours', tag: null },
+        { id: 'o-w-3g',   label: '3 Go',   price: 2000, validity: '7 jours', tag: 'Meilleur' },
+        { id: 'o-w-5g',   label: '5 Go',   price: 3000, validity: '7 jours', tag: null },
+      ],
+      monthly: [
+        { id: 'o-m-2g',   label: '2 Go',   price: 2000,  validity: '30 jours', tag: null },
+        { id: 'o-m-5g',   label: '5 Go',   price: 3500,  validity: '30 jours', tag: 'Populaire' },
+        { id: 'o-m-10g',  label: '10 Go',  price: 5000,  validity: '30 jours', tag: null },
+        { id: 'o-m-20g',  label: '20 Go',  price: 8000,  validity: '30 jours', tag: 'Top valeur' },
+        { id: 'o-m-40g',  label: '40 Go',  price: 15000, validity: '30 jours', tag: null },
+      ],
+    },
+    mtn: {
+      daily: [
+        { id: 'm-d-220m', label: '220 Mo', price: 200, validity: '2 jours', tag: null },
+        { id: 'm-d-400m', label: '400 Mo', price: 300, validity: '3 jours', tag: null },
+        { id: 'm-d-450m', label: '450 Mo', price: 450, validity: '3 jours', tag: null },
+        { id: 'm-d-750m', label: '750 Mo', price: 500, validity: '3 jours', tag: 'Populaire' },
+      ],
+      weekly: [
+        { id: 'm-w-1g5',  label: '1,5 Go', price: 1000, validity: '5 jours',  tag: null },
+        { id: 'm-w-2g2',  label: '2,2 Go', price: 1500, validity: '10 jours', tag: 'Meilleur' },
+      ],
+      monthly: [
+        { id: 'm-m-3g',   label: '3 Go',   price: 2000,  validity: '30 jours', tag: null },
+        { id: 'm-m-3g7',  label: '3,7 Go', price: 2500,  validity: '30 jours', tag: null },
+        { id: 'm-m-7g4',  label: '7,4 Go', price: 5000,  validity: '30 jours', tag: 'Populaire' },
+        { id: 'm-m-20g',  label: '20 Go',  price: 10000, validity: '30 jours', tag: 'Top valeur' },
+        { id: 'm-m-30g',  label: '30 Go',  price: 15000, validity: '30 jours', tag: null },
+        { id: 'm-m-45g',  label: '45 Go',  price: 20000, validity: '30 jours', tag: null },
+      ],
+    },
+    moov: {
+      daily: [
+        { id: 'mo-d-150m', label: '150 Mo', price: 150, validity: '2 jours', tag: null },
+        { id: 'mo-d-220m', label: '220 Mo', price: 200, validity: '2 jours', tag: null },
+        { id: 'mo-d-400m', label: '400 Mo', price: 300, validity: '2 jours', tag: null },
+        { id: 'mo-d-750m', label: '750 Mo', price: 500, validity: '3 jours', tag: 'Populaire' },
+      ],
+      weekly: [
+        { id: 'mo-w-1g',   label: '1 Go',   price: 750,  validity: '7 jours',  tag: null },
+        { id: 'mo-w-1g5',  label: '1,5 Go', price: 1000, validity: '5 jours',  tag: null },
+        { id: 'mo-w-2g5',  label: '2,5 Go', price: 1500, validity: '10 jours', tag: 'Meilleur' },
+      ],
+      monthly: [
+        { id: 'mo-m-3g',   label: '3 Go',   price: 2000,  validity: '30 jours', tag: null },
+        { id: 'mo-m-7g4',  label: '7,4 Go', price: 4900,  validity: '30 jours', tag: 'Populaire' },
+        { id: 'mo-m-15g',  label: '15 Go',  price: 8000,  validity: '30 jours', tag: null },
+        { id: 'mo-m-25g',  label: '25 Go',  price: 12000, validity: '30 jours', tag: 'Top valeur' },
+        { id: 'mo-m-40g',  label: '40 Go',  price: 18000, validity: '30 jours', tag: null },
+      ],
+    },
+  },
+  calls: {
+    orange: {
+      daily: [
+        { id: 'oc-d-on30',  label: '30 min',  price: 100, validity: '24h',     tag: null,       note: 'Orange→Orange' },
+        { id: 'oc-d-on60',  label: '60 min',  price: 150, validity: '24h',     tag: 'Populaire',note: 'Orange→Orange' },
+        { id: 'oc-d-all30', label: '30 min',  price: 200, validity: '24h',     tag: null,       note: 'Tous réseaux' },
+        { id: 'oc-d-nuit',  label: 'Nuit',    price: 100, validity: '21h–7h',  tag: 'Nuit',     note: 'Illimité Orange' },
+      ],
+      weekly: [
+        { id: 'oc-w-200',  label: '200 min', price: 500,  validity: '7 jours', tag: null,       note: 'Orange→Orange' },
+        { id: 'oc-w-all',  label: '100 min', price: 1000, validity: '7 jours', tag: 'Meilleur', note: 'Tous réseaux' },
+      ],
+      monthly: [
+        { id: 'oc-m-ilim', label: 'Illimité', price: 3000, validity: '30 jours', tag: 'Top',   note: 'Orange→Orange' },
+        { id: 'oc-m-500',  label: '500 min',  price: 4000, validity: '30 jours', tag: null,     note: 'Tous réseaux' },
+      ],
+    },
+    mtn: {
+      daily: [
+        { id: 'mc-d-on30',  label: '30 min', price: 100, validity: '24h',     tag: null,        note: 'MTN→MTN' },
+        { id: 'mc-d-on60',  label: '60 min', price: 150, validity: '24h',     tag: 'Populaire', note: 'MTN→MTN' },
+        { id: 'mc-d-all20', label: '20 min', price: 200, validity: '24h',     tag: null,        note: 'Tous réseaux' },
+      ],
+      weekly: [
+        { id: 'mc-w-100',  label: '100 min', price: 500,  validity: '7 jours', tag: null,       note: 'MTN→MTN' },
+        { id: 'mc-w-all',  label: '50 min',  price: 750,  validity: '7 jours', tag: 'Meilleur', note: 'Tous réseaux' },
+      ],
+      monthly: [
+        { id: 'mc-m-300',  label: '300 min', price: 1500, validity: '30 jours', tag: null,     note: 'MTN→MTN' },
+        { id: 'mc-m-all',  label: '150 min', price: 3000, validity: '30 jours', tag: 'Top',    note: 'Tous réseaux' },
+      ],
+    },
+    moov: {
+      daily: [
+        { id: 'movc-d-on30', label: '30 min', price: 100, validity: '24h',     tag: null,        note: 'Moov→Moov' },
+        { id: 'movc-d-on60', label: '60 min', price: 150, validity: '24h',     tag: 'Populaire', note: 'Moov→Moov' },
+        { id: 'movc-d-all',  label: '20 min', price: 200, validity: '24h',     tag: null,        note: 'Tous réseaux' },
+      ],
+      weekly: [
+        { id: 'movc-w-150', label: '150 min', price: 500,  validity: '7 jours', tag: null,       note: 'Moov→Moov' },
+        { id: 'movc-w-all', label: '60 min',  price: 800,  validity: '7 jours', tag: 'Meilleur', note: 'Tous réseaux' },
+      ],
+      monthly: [
+        { id: 'movc-m-400',  label: '400 min', price: 2000, validity: '30 jours', tag: null,    note: 'Moov→Moov' },
+        { id: 'movc-m-ilim', label: 'Illimité', price: 5000, validity: '30 jours', tag: 'Top',  note: 'Moov→Moov' },
+      ],
+    },
+  },
+};
+
+// ==========================================
 // CONFIGURATION GENIUSPAY
 // ==========================================
 const GENIUSPAY_BASE = 'https://pay.genius.ci/api/v1/merchant';
@@ -521,6 +642,12 @@ function validateOperationInput(provider, phone, amount, pin) {
 // ==========================================
 // API ROUTES
 // ==========================================
+
+// Forfaits opérateurs — servis côté serveur pour mise à jour centralisée
+app.get('/api/bundles', (req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=3600'); // cache 1h
+  res.json(OPERATOR_BUNDLES);
+});
 
 // Status GeniusPay
 app.get('/api/geniuspay/status', (req, res) => {

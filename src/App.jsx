@@ -6,7 +6,7 @@ import {
   AlertTriangle, Info, X, Download, Send,
   TrendingUp, TrendingDown, BarChart2, Radio, Star, Wifi,
   ChevronLeft, ChevronRight, Copy, Ban, Eye, EyeOff,
-  Activity, DollarSign, Target, Layers
+  Activity, Banknote, Target, Layers, Phone
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import './App.css';
@@ -32,8 +32,9 @@ const OPERATOR_CAPS = {
   internet: ['orange', 'mtn', 'moov'],
 };
 
-// === INTERNET BUNDLES — Données officielles opérateurs CI (orange.ci / mtn.ci / moov-africa.ci) ===
-const INTERNET_BUNDLES = {
+// === FORFAITS — chargés depuis /api/bundles au démarrage (source: server.js)
+// Ne pas modifier ici — modifier OPERATOR_BUNDLES dans server.js
+const INTERNET_BUNDLES_FALLBACK = {
   orange: {
     daily: [
       { id: 'o-d-40m',  label: '40 Mo',  price: 100, validity: '24h',    tag: null },
@@ -96,7 +97,7 @@ const INTERNET_BUNDLES = {
       { id: 'mo-m-45g',  label: '45 Go',  price: 19900, validity: '30 jours', tag: null },
     ],
   },
-};
+}; // fallback uniquement si /api/bundles échoue
 
 // === OPERATION CONFIG — single source of truth ===
 const OP_CONFIG = {
@@ -344,6 +345,9 @@ function App() {
   // Balance visibility toggle
   const [balanceHidden, setBalanceHidden] = useState(false);
 
+  // Forfaits opérateurs — chargés depuis /api/bundles
+  const [serverBundles, setServerBundles] = useState({ internet: INTERNET_BUNDLES_FALLBACK, calls: {}, lastUpdated: null });
+
   const avatarInitials = agentName
     .split(' ')
     .filter(Boolean)
@@ -410,6 +414,14 @@ function App() {
       const data = await res.json();
       setGpStatus(data);
     } catch (e) { /* silent */ }
+  };
+
+  const fetchBundles = async () => {
+    try {
+      const res = await fetch(`${API_URL}/bundles`);
+      const data = await res.json();
+      setServerBundles(data);
+    } catch (e) { /* keep fallback */ }
   };
 
   const fetchAnalytics = async () => {
@@ -493,6 +505,10 @@ function App() {
   useEffect(() => {
     if (activeTab === 'analytics') fetchAnalytics();
   }, [activeTab]);
+
+  useEffect(() => {
+    fetchBundles(); // load once on mount — refreshed on page reload
+  }, []);
 
   useEffect(() => {
     fetchData();
@@ -788,46 +804,54 @@ function App() {
         </div>
       </div>
 
-      {/* ── ANALYTICS CARDS ── */}
+      {/* ── ANALYTICS CARDS — cliquables ── */}
       <div className="analytics-grid animate-in" style={{animationDelay: '0.02s'}}>
-        <div className="analytics-card ac-green">
+        <div className="analytics-card ac-green analytics-card--nav"
+          onClick={() => { setActiveTab('transactions'); setTransactionStatus('SUCCESS'); }}
+          title="Voir les transactions réussies">
           <div className="analytics-icon ac-icon-green"><CheckCircle2 size={22}/></div>
           <div className="analytics-content">
             <p>Transactions réussies</p>
             <h3>{successCount}</h3>
             <div className="analytics-trend trend-up">
-              <TrendingUp size={11}/><span>Aujourd'hui</span>
+              <TrendingUp size={11}/><span>Voir le détail →</span>
             </div>
           </div>
         </div>
-        <div className="analytics-card ac-blue">
-          <div className="analytics-icon ac-icon-blue"><DollarSign size={22}/></div>
+        <div className="analytics-card ac-blue analytics-card--nav"
+          onClick={() => { setActiveTab('transactions'); setTransactionStatus('all'); }}
+          title="Voir toutes les transactions">
+          <div className="analytics-icon ac-icon-blue"><Banknote size={22}/></div>
           <div className="analytics-content">
             <p>Volume total (FCFA)</p>
             <h3>{new Intl.NumberFormat('fr-FR').format(totalVolume)}</h3>
             <div className="analytics-trend trend-up">
-              <TrendingUp size={11}/><span>Cumulé</span>
+              <TrendingUp size={11}/><span>Voir le détail →</span>
             </div>
           </div>
         </div>
-        <div className="analytics-card ac-yellow">
-          <div className="analytics-icon ac-icon-yellow"><Zap size={22}/></div>
+        <div className="analytics-card ac-yellow analytics-card--nav"
+          onClick={() => setActiveTab('analytics')}
+          title="Voir les analytiques">
+          <div className="analytics-icon ac-icon-yellow"><Activity size={22}/></div>
           <div className="analytics-content">
             <p>Montant moyen</p>
             <h3>{avgAmount !== null ? new Intl.NumberFormat('fr-FR').format(avgAmount) : '—'}</h3>
             <div className="analytics-trend trend-neutral">
-              <Activity size={11}/><span>Par transaction</span>
+              <BarChart2 size={11}/><span>Voir les graphes →</span>
             </div>
           </div>
         </div>
-        <div className="analytics-card ac-purple">
+        <div className="analytics-card ac-purple analytics-card--nav"
+          onClick={() => setActiveTab('analytics')}
+          title="Voir les analytiques">
           <div className="analytics-icon ac-icon-purple"><Target size={22}/></div>
           <div className="analytics-content">
             <p>Taux de succès</p>
             <h3>{successRate}%</h3>
             <div className={`analytics-trend ${successRate >= 80 ? 'trend-up' : successRate >= 50 ? 'trend-neutral' : 'trend-down'}`}>
               {successRate >= 80 ? <TrendingUp size={11}/> : successRate >= 50 ? <Activity size={11}/> : <TrendingDown size={11}/>}
-              <span>{successRate >= 80 ? 'Excellent' : successRate >= 50 ? 'Correct' : 'À améliorer'}</span>
+              <span>{successRate >= 80 ? 'Excellent' : successRate >= 50 ? 'Correct' : 'Voir les graphes →'}</span>
             </div>
           </div>
         </div>
@@ -942,9 +966,9 @@ function App() {
                 </div>
               </div>
 
-              {/* Internet: Bundle selector par catégorie */}
+              {/* ── Internet: forfait data par catégorie ── */}
               {activeOperation === 'internet' && (() => {
-                const opBundles = INTERNET_BUNDLES[selectedProvider] || {};
+                const opBundles = (serverBundles.internet || INTERNET_BUNDLES_FALLBACK)[selectedProvider] || {};
                 const cats = [
                   { key: 'daily',   label: '⏱ Journalier' },
                   { key: 'weekly',  label: '📅 Hebdomadaire' },
@@ -952,7 +976,12 @@ function App() {
                 ];
                 return (
                   <div className="form-group">
-                    <label>Choisir un forfait</label>
+                    <div className="bundle-header-row">
+                      <label>Choisir un forfait internet</label>
+                      {serverBundles.lastUpdated && (
+                        <span className="bundle-updated">Màj {serverBundles.lastUpdated}</span>
+                      )}
+                    </div>
                     {cats.map(({ key, label }) => {
                       const bundles = opBundles[key] || [];
                       if (!bundles.length) return null;
@@ -980,6 +1009,53 @@ function App() {
                 );
               })()}
 
+              {/* ── Crédit: forfait appels par catégorie ── */}
+              {activeOperation === 'airtime' && (() => {
+                const opCalls = (serverBundles.calls || {})[selectedProvider] || {};
+                const hasCalls = Object.values(opCalls).some(arr => arr?.length > 0);
+                if (!hasCalls) return null;
+                const cats = [
+                  { key: 'daily',   label: '⏱ Journalier' },
+                  { key: 'weekly',  label: '📅 Hebdomadaire' },
+                  { key: 'monthly', label: '🗓 Mensuel' },
+                ];
+                return (
+                  <div className="form-group">
+                    <div className="bundle-header-row">
+                      <label>Forfaits appels disponibles</label>
+                      {serverBundles.lastUpdated && (
+                        <span className="bundle-updated">Màj {serverBundles.lastUpdated}</span>
+                      )}
+                    </div>
+                    {cats.map(({ key, label }) => {
+                      const bundles = opCalls[key] || [];
+                      if (!bundles.length) return null;
+                      return (
+                        <div key={key} className="bundle-category">
+                          <div className="bundle-cat-label">{label}</div>
+                          <div className="bundle-grid">
+                            {bundles.map(b => (
+                              <div key={b.id}
+                                className={`bundle-card call-card${selectedBundle?.id === b.id ? ' selected' : ''}`}
+                                style={selectedBundle?.id === b.id ? {'--bundle-color': OP_CONFIG.airtime.color} : {}}
+                                onClick={() => { setSelectedBundle(b); setAmount(String(b.price)); }}
+                              >
+                                {b.tag && <span className="bundle-tag call-tag">{b.tag}</span>}
+                                <div className="bundle-size"><Phone size={12} style={{marginBottom:3}}/>{b.label}</div>
+                                <div className="bundle-price">{new Intl.NumberFormat('fr-FR').format(b.price)} F</div>
+                                <div className="bundle-validity">{b.validity}</div>
+                                {b.note && <div className="bundle-note">{b.note}</div>}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <div className="bundle-or-divider"><span>— ou saisir un montant libre —</span></div>
+                  </div>
+                );
+              })()}
+
               {/* Amount field — not shown for internet */}
               {activeOperation !== 'internet' && (
                 <div className="form-group">
@@ -990,15 +1066,15 @@ function App() {
                       inputMode="numeric"
                       placeholder="0"
                       value={amount}
-                      onChange={(e) => setAmount(e.target.value)}
+                      onChange={(e) => { setAmount(e.target.value); setSelectedBundle(null); }}
                       required min="100" max="5000000"
                     />
                     <span className="currency">FCFA</span>
                   </div>
                   <div className="quick-amounts">
-                    {[500, 1000, 2000, 5000].map(v => (
+                    {[200, 500, 1000, 2000, 5000].map(v => (
                       <button key={v} type="button" className="quick-amount-btn"
-                        onClick={() => setAmount(String(v))}>
+                        onClick={() => { setAmount(String(v)); setSelectedBundle(null); }}>
                         {new Intl.NumberFormat('fr-FR').format(v)}
                       </button>
                     ))}
