@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Cabine 2.0</string>
+    <string name="title_activity_main">Cabine 2.0</string>
+    <string name="package_name">ci.cabine.app</string>
+    <string name="custom_url_scheme">ci.cabine.app</string>
+</resources>
