@@ -414,6 +414,26 @@ async function initDb() {
   done_by INTEGER,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 )`;
+  const commissionPg = `CREATE TABLE IF NOT EXISTS commission_config (
+  type VARCHAR(50) PRIMARY KEY,
+  label VARCHAR(100),
+  rate_percent DECIMAL(5,2) NOT NULL DEFAULT 2.00,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_by INTEGER
+)`;
+  const commissionSqlite = `CREATE TABLE IF NOT EXISTS commission_config (
+  type TEXT PRIMARY KEY,
+  label TEXT,
+  rate_percent REAL NOT NULL DEFAULT 2.00,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_by INTEGER
+)`;
+  const COMMISSION_DEFAULTS = [
+    { type: 'transfer', label: 'Transfert inter-réseaux' },
+    { type: 'withdraw', label: 'Retrait Mobile Money' },
+    { type: 'airtime',  label: 'Recharge crédit téléphonique' },
+    { type: 'internet', label: 'Forfait internet mobile' },
+  ];
   const txPg = `CREATE TABLE IF NOT EXISTS transactions (
     id SERIAL PRIMARY KEY, wallet_id INTEGER, type VARCHAR(50),
     provider VARCHAR(50), phone VARCHAR(50), amount INTEGER,
@@ -441,6 +461,13 @@ async function initDb() {
       await pool.query(agentsPg);
       await pool.query(invoicesPg);
       await pool.query(ledgerPg);
+      await pool.query(commissionPg);
+      for (const c of COMMISSION_DEFAULTS) {
+        await pool.query(
+          'INSERT INTO commission_config (type, label, rate_percent) VALUES ($1, $2, $3) ON CONFLICT (type) DO NOTHING',
+          [c.type, c.label, 2.00]
+        );
+      }
       const res = await pool.query('SELECT * FROM wallets WHERE id = 1');
       if (res.rows.length === 0) {
         await pool.query('INSERT INTO wallets (id, agent_name, balance, pin) VALUES (1, $1, $2, $3)', ['Ibrahim Doumbia', 2450000, '1234']);
@@ -465,6 +492,10 @@ async function initDb() {
           sqliteDb.run(agentsSqlite);
           sqliteDb.run(invoicesSqlite);
           sqliteDb.run(ledgerSqlite);
+          sqliteDb.run(commissionSqlite);
+          for (const c of COMMISSION_DEFAULTS) {
+            sqliteDb.run('INSERT OR IGNORE INTO commission_config (type, label, rate_percent) VALUES (?, ?, ?)', [c.type, c.label, 2.00]);
+          }
           sqliteDb.get('SELECT * FROM wallets WHERE id = 1', (err, row) => {
             if (!row) {
               sqliteDb.run('INSERT INTO wallets (agent_name, balance, pin) VALUES (?, ?, ?)', ['Ibrahim Doumbia', 2450000, '1234']);
@@ -857,14 +888,15 @@ app.get('/api/admin/overview', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Recharger le solde d'un agent
+// Recharger le solde d'un agent (ou 'self' pour l'admin lui-même)
 app.post('/api/admin/recharge/:agentId', authMiddleware, async (req, res) => {
   if (req.agent.role !== 'admin') return res.status(403).json({ error: 'Admin requis.' });
   const { amount, description = 'Recharge admin' } = req.body;
   const numAmount = parseInt(amount, 10);
   if (!numAmount || numAmount <= 0) return res.status(400).json({ error: 'Montant invalide.' });
   try {
-    const agent = await queryGet('SELECT id, wallet_id, name FROM agents WHERE id = ?', [req.params.agentId]);
+    const targetId = req.params.agentId === 'self' ? req.agent.agentId : req.params.agentId;
+    const agent = await queryGet('SELECT id, wallet_id, name FROM agents WHERE id = ?', [targetId]);
     if (!agent) return res.status(404).json({ error: 'Agent introuvable.' });
     await queryRunUpdate('UPDATE wallets SET balance = balance + ? WHERE id = ?', [numAmount, agent.wallet_id]);
     await queryRunInsert(
@@ -941,6 +973,38 @@ app.get('/api/wallet/ledger', authMiddleware, async (req, res) => {
       [wid]
     );
     res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ==========================================
+// COMMISSIONS
+// ==========================================
+
+// Lire toutes les commissions
+app.get('/api/commissions', authMiddleware, async (req, res) => {
+  try {
+    const rows = await queryAll('SELECT * FROM commission_config ORDER BY type');
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Mettre à jour une commission (admin)
+app.put('/api/commissions/:type', authMiddleware, async (req, res) => {
+  if (req.agent.role !== 'admin') return res.status(403).json({ error: 'Admin requis.' });
+  const { type } = req.params;
+  const { rate_percent } = req.body;
+  if (!['transfer', 'withdraw', 'airtime', 'internet'].includes(type))
+    return res.status(400).json({ error: 'Type invalide.' });
+  const rate = parseFloat(rate_percent);
+  if (isNaN(rate) || rate < 0 || rate > 20)
+    return res.status(400).json({ error: 'Taux invalide (0–20%).' });
+  try {
+    await queryRunUpdate(
+      `UPDATE commission_config SET rate_percent = ?, updated_at = ${isPostgres ? 'NOW()' : "datetime('now')"}, updated_by = ? WHERE type = ?`,
+      [rate, req.agent.agentId, type]
+    );
+    log('INFO', `Commission ${type} → ${rate}%`, { by: req.agent.email });
+    res.json({ type, rate_percent: rate, message: `Commission ${type} mise à jour à ${rate}%.` });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

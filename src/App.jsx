@@ -495,6 +495,10 @@ function App() {
   const [rechargeMsg, setRechargeMsg]         = useState('');
   const [genInvoiceMsg, setGenInvoiceMsg]     = useState('');
 
+  // Commission config
+  const [commissions, setCommissions] = useState({ transfer: 2, withdraw: 2, airtime: 2, internet: 2 });
+  const [commissionSaving, setCommissionSaving] = useState({}); // { [type]: bool }
+
   // Balance visibility toggle
   const [balanceHidden, setBalanceHidden] = useState(false);
 
@@ -581,6 +585,39 @@ function App() {
       const data = await res.json();
       setServerBundles(data);
     } catch (e) { /* keep fallback */ }
+  };
+
+  const fetchCommissions = async () => {
+    try {
+      const res = await apiFetch('/commissions');
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        const map = {};
+        data.forEach(c => { map[c.type] = parseFloat(c.rate_percent) ?? 2; });
+        setCommissions(prev => ({ ...prev, ...map }));
+      }
+    } catch { /* keep defaults */ }
+  };
+
+  const saveCommission = async (type, rate) => {
+    setCommissionSaving(prev => ({ ...prev, [type]: true }));
+    try {
+      const res = await apiFetch(`/commissions/${type}`, {
+        method: 'PUT',
+        body: JSON.stringify({ rate_percent: rate }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setCommissions(prev => ({ ...prev, [type]: rate }));
+        addToast('success', 'Commission mise à jour', data.message);
+      } else {
+        addToast('error', 'Erreur', data.error);
+      }
+    } catch (err) {
+      addToast('error', 'Erreur réseau', err.message);
+    } finally {
+      setCommissionSaving(prev => ({ ...prev, [type]: false }));
+    }
   };
 
   const apiFetch = useCallback(async (path, options = {}) => {
@@ -770,8 +807,12 @@ function App() {
   useEffect(() => {
     if (activeTab === 'analytics') fetchAnalytics();
     if (activeTab === 'settings' && authAgent?.role === 'admin') fetchAgents();
-    if (activeTab === 'admin' && authAgent?.role === 'admin') { fetchAdminOverview(); fetchAdminInvoices(); }
+    if (activeTab === 'admin' && authAgent?.role === 'admin') { fetchAdminOverview(); fetchAdminInvoices(); fetchCommissions(); }
   }, [activeTab]);
+
+  useEffect(() => {
+    if (authAgent) fetchCommissions();
+  }, [authAgent]);
 
   useEffect(() => {
     fetchBundles();
@@ -2075,6 +2116,34 @@ function App() {
           </button>
         </div>
 
+        {/* Mon compte — self-recharge */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '24px' }}>
+          <div style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)', borderRadius: '16px', padding: '20px', color: 'white' }}>
+            <div style={{ fontSize: '12px', opacity: 0.85, marginBottom: '4px', fontWeight: 500 }}>MON SOLDE FLOTTE</div>
+            <div style={{ fontSize: '28px', fontWeight: 800, marginBottom: '4px' }}>
+              {new Intl.NumberFormat('fr-FR').format(balance)} <span style={{ fontSize: '14px', fontWeight: 500 }}>FCFA</span>
+            </div>
+            <div style={{ fontSize: '12px', opacity: 0.75 }}>{agentName} • Admin</div>
+          </div>
+          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '16px', padding: '20px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+            <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '8px' }}>Recharger mon propre compte</div>
+            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+              Pour créditer votre flotte après un dépôt GeniusPay ou virement reçu.
+            </div>
+            <button
+              className="btn-primary"
+              style={{ background: '#6366f1', fontSize: '13px' }}
+              onClick={() => {
+                setRechargeModal({ agentId: 'self', agentName: agentName + ' (moi)', currentBalance: balance });
+                setRechargeAmount(''); setRechargeNote(''); setRechargeMsg('');
+              }}
+            >
+              <Banknote size={15} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
+              Recharger mon compte
+            </button>
+          </div>
+        </div>
+
         {/* Summary KPI cards */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '14px', marginBottom: '24px' }}>
           {[
@@ -2249,6 +2318,65 @@ function App() {
                 </table>
               </div>
             )}
+          </div>
+        </div>
+
+        {/* Commission configuration */}
+        <div className="card" style={{ marginBottom: '24px' }}>
+          <div className="card-header">
+            <Target size={16} style={{ marginRight: '8px', verticalAlign: 'middle' }} />
+            Taux de commission par opération
+            <span style={{ marginLeft: '8px', fontSize: '11px', color: 'var(--text-muted)', fontWeight: 400 }}>
+              — affiché aux agents pendant la confirmation
+            </span>
+          </div>
+          <div className="card-body">
+            <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '16px' }}>
+              Ces taux guident l'agent sur la commission à collecter en plus du montant envoyé au client.
+              Ex : transfert 10 000 FCFA à 2% → l'agent collecte 10 200 FCFA du client.
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
+              {[
+                { type: 'transfer', label: 'Transfert',   icon: <ArrowUpRight size={16}/>,    color: '#6366f1' },
+                { type: 'withdraw', label: 'Retrait',     icon: <ArrowDownToLine size={16}/>, color: '#10b981' },
+                { type: 'airtime',  label: 'Crédit tél.', icon: <PhoneCall size={16}/>,       color: '#f59e0b' },
+                { type: 'internet', label: 'Internet',    icon: <Wifi size={16}/>,            color: '#3b82f6' },
+              ].map(({ type, label, icon, color }) => {
+                const [localRate, setLocalRate] = React.useState(commissions[type] ?? 2);
+                return (
+                  <div key={type} style={{
+                    padding: '14px', borderRadius: '12px', border: '1px solid var(--border-color)',
+                    background: 'var(--bg-hover)', display: 'flex', flexDirection: 'column', gap: '10px',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color }}>
+                      {icon}
+                      <span style={{ fontWeight: 600, fontSize: '14px', color: 'var(--text-dark)' }}>{label}</span>
+                      <span style={{ marginLeft: 'auto', fontSize: '18px', fontWeight: 800, color }}>{commissions[type]}%</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <input
+                        type="number"
+                        min="0" max="20" step="0.5"
+                        defaultValue={commissions[type]}
+                        onChange={e => setLocalRate(parseFloat(e.target.value) || 0)}
+                        style={{ flex: 1, textAlign: 'center', fontWeight: 700 }}
+                      />
+                      <button
+                        className="btn-primary"
+                        style={{ fontSize: '12px', padding: '6px 14px', background: color, opacity: commissionSaving[type] ? 0.6 : 1 }}
+                        disabled={commissionSaving[type]}
+                        onClick={() => saveCommission(type, localRate)}
+                      >
+                        {commissionSaving[type] ? <RefreshCw size={12} style={{ animation: 'spin 1s linear infinite' }} /> : 'Enregistrer'}
+                      </button>
+                    </div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                      Sur 10 000 FCFA → collectez <strong>{Math.round(10000 * (commissions[type] / 100 + 1)).toLocaleString('fr-FR')} FCFA</strong>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
 
@@ -2489,6 +2617,38 @@ function App() {
                         </span>
                       </div>
                     )}
+                    {(() => {
+                      const rate = commissions[activeOperation] ?? 2;
+                      const commissionAmt = Math.round(displayAmount * rate / 100);
+                      const geniusFee = activeOperation !== 'withdraw' ? Math.round(displayAmount * 0.01) : 0;
+                      const netProfit = commissionAmt - geniusFee;
+                      return (
+                        <div style={{ marginTop: '10px', padding: '10px 14px', borderRadius: '10px', background: 'rgba(16,185,129,0.08)', border: '1px dashed rgba(16,185,129,0.3)' }}>
+                          <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-green)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                            Votre gain estimé
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '3px' }}>
+                            <span>Commission à collecter ({rate}%)</span>
+                            <span style={{ fontWeight: 600, color: 'var(--accent-green)' }}>+{new Intl.NumberFormat('fr-FR').format(commissionAmt)} FCFA</span>
+                          </div>
+                          {geniusFee > 0 && (
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '3px' }}>
+                              <span>Frais GeniusPay (1%)</span>
+                              <span style={{ color: 'var(--accent-red)' }}>−{new Intl.NumberFormat('fr-FR').format(geniusFee)} FCFA</span>
+                            </div>
+                          )}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', fontWeight: 700, borderTop: '1px solid rgba(16,185,129,0.2)', paddingTop: '6px', marginTop: '4px' }}>
+                            <span style={{ color: 'var(--text-dark)' }}>Bénéfice net</span>
+                            <span style={{ color: netProfit >= 0 ? 'var(--accent-green)' : 'var(--accent-red)' }}>
+                              {netProfit >= 0 ? '+' : ''}{new Intl.NumberFormat('fr-FR').format(netProfit)} FCFA
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                            Collectez <strong>{new Intl.NumberFormat('fr-FR').format(displayAmount + commissionAmt)} FCFA</strong> du client
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                   <div className="confirm-actions">
                     <button className="btn-secondary" onClick={() => setShowConfirmModal(false)}>
