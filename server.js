@@ -376,6 +376,44 @@ async function initDb() {
     active INTEGER DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`;
+  const invoicesPg = `CREATE TABLE IF NOT EXISTS invoices (
+  id SERIAL PRIMARY KEY,
+  agent_id INTEGER REFERENCES agents(id),
+  wallet_id INTEGER,
+  period VARCHAR(7) NOT NULL,
+  amount INTEGER NOT NULL DEFAULT 10000,
+  status VARCHAR(20) DEFAULT 'pending',
+  paid_at TIMESTAMP,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)`;
+  const invoicesSqlite = `CREATE TABLE IF NOT EXISTS invoices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_id INTEGER,
+  wallet_id INTEGER,
+  period TEXT NOT NULL,
+  amount INTEGER NOT NULL DEFAULT 10000,
+  status TEXT DEFAULT 'pending',
+  paid_at DATETIME,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)`;
+  const ledgerPg = `CREATE TABLE IF NOT EXISTS balance_ledger (
+  id SERIAL PRIMARY KEY,
+  wallet_id INTEGER,
+  amount INTEGER NOT NULL,
+  type VARCHAR(50) NOT NULL,
+  description TEXT,
+  done_by INTEGER,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)`;
+  const ledgerSqlite = `CREATE TABLE IF NOT EXISTS balance_ledger (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  wallet_id INTEGER,
+  amount INTEGER NOT NULL,
+  type TEXT NOT NULL,
+  description TEXT,
+  done_by INTEGER,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)`;
   const txPg = `CREATE TABLE IF NOT EXISTS transactions (
     id SERIAL PRIMARY KEY, wallet_id INTEGER, type VARCHAR(50),
     provider VARCHAR(50), phone VARCHAR(50), amount INTEGER,
@@ -401,6 +439,8 @@ async function initDb() {
       await pool.query(walletsPg);
       await pool.query(txPg);
       await pool.query(agentsPg);
+      await pool.query(invoicesPg);
+      await pool.query(ledgerPg);
       const res = await pool.query('SELECT * FROM wallets WHERE id = 1');
       if (res.rows.length === 0) {
         await pool.query('INSERT INTO wallets (id, agent_name, balance, pin) VALUES (1, $1, $2, $3)', ['Ibrahim Doumbia', 2450000, '1234']);
@@ -423,6 +463,8 @@ async function initDb() {
           sqliteDb.run(walletsSqlite);
           sqliteDb.run(txSqlite);
           sqliteDb.run(agentsSqlite);
+          sqliteDb.run(invoicesSqlite);
+          sqliteDb.run(ledgerSqlite);
           sqliteDb.get('SELECT * FROM wallets WHERE id = 1', (err, row) => {
             if (!row) {
               sqliteDb.run('INSERT INTO wallets (agent_name, balance, pin) VALUES (?, ?, ?)', ['Ibrahim Doumbia', 2450000, '1234']);
@@ -780,6 +822,125 @@ app.put('/api/agents/:id/toggle', authMiddleware, async (req, res) => {
     const newActive = agent.active ? 0 : 1;
     await queryRunUpdate('UPDATE agents SET active = ? WHERE id = ?', [newActive, req.params.id]);
     res.json({ active: !!newActive });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ==========================================
+// ADMIN — SUPERVISION + RECHARGE + FACTURATION
+// ==========================================
+
+// Vue d'ensemble superviseur
+app.get('/api/admin/overview', authMiddleware, async (req, res) => {
+  if (req.agent.role !== 'admin') return res.status(403).json({ error: 'Admin requis.' });
+  try {
+    const agents = await queryAll(
+      `SELECT a.id, a.name, a.email, a.role, a.active, a.created_at,
+        w.balance,
+        COUNT(t.id) as today_tx,
+        SUM(CASE WHEN t.status='SUCCESS' THEN 1 ELSE 0 END) as today_success,
+        SUM(CASE WHEN t.status='SUCCESS' THEN t.amount ELSE 0 END) as today_volume
+       FROM agents a
+       LEFT JOIN wallets w ON a.wallet_id = w.id
+       LEFT JOIN transactions t ON t.wallet_id = w.id AND DATE(t.created_at) = ${isPostgres ? 'CURRENT_DATE' : "DATE('now')"}
+       GROUP BY a.id, a.name, a.email, a.role, a.active, a.created_at, w.balance
+       ORDER BY a.created_at ASC`
+    );
+    const summary = {
+      totalAgents: agents.length,
+      activeAgents: agents.filter(a => a.active).length,
+      totalFloat: agents.reduce((s, a) => s + (parseInt(a.balance) || 0), 0),
+      todayTx: agents.reduce((s, a) => s + (parseInt(a.today_tx) || 0), 0),
+      todayVolume: agents.reduce((s, a) => s + (parseInt(a.today_volume) || 0), 0),
+      todaySuccess: agents.reduce((s, a) => s + (parseInt(a.today_success) || 0), 0),
+    };
+    res.json({ summary, agents });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Recharger le solde d'un agent
+app.post('/api/admin/recharge/:agentId', authMiddleware, async (req, res) => {
+  if (req.agent.role !== 'admin') return res.status(403).json({ error: 'Admin requis.' });
+  const { amount, description = 'Recharge admin' } = req.body;
+  const numAmount = parseInt(amount, 10);
+  if (!numAmount || numAmount <= 0) return res.status(400).json({ error: 'Montant invalide.' });
+  try {
+    const agent = await queryGet('SELECT id, wallet_id, name FROM agents WHERE id = ?', [req.params.agentId]);
+    if (!agent) return res.status(404).json({ error: 'Agent introuvable.' });
+    await queryRunUpdate('UPDATE wallets SET balance = balance + ? WHERE id = ?', [numAmount, agent.wallet_id]);
+    await queryRunInsert(
+      'INSERT INTO balance_ledger (wallet_id, amount, type, description, done_by) VALUES (?, ?, ?, ?, ?)',
+      [agent.wallet_id, numAmount, 'RECHARGE', description, req.agent.agentId]
+    );
+    const wallet = await queryGet('SELECT balance FROM wallets WHERE id = ?', [agent.wallet_id]);
+    log('INFO', `Recharge ${agent.name}: +${numAmount} FCFA`, { by: req.agent.email });
+    res.json({ message: `+${numAmount} FCFA crédités à ${agent.name}`, newBalance: wallet.balance });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Lister les factures
+app.get('/api/invoices', authMiddleware, async (req, res) => {
+  try {
+    const sql = req.agent.role === 'admin'
+      ? 'SELECT i.*, a.name as agent_name, a.email FROM invoices i JOIN agents a ON i.agent_id = a.id ORDER BY i.created_at DESC LIMIT 100'
+      : 'SELECT i.*, a.name as agent_name FROM invoices i JOIN agents a ON i.agent_id = a.id WHERE i.agent_id = ? ORDER BY i.created_at DESC LIMIT 24';
+    const params = req.agent.role === 'admin' ? [] : [req.agent.agentId];
+    const rows = await queryAll(sql, params);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Générer les factures du mois (admin)
+app.post('/api/invoices/generate', authMiddleware, async (req, res) => {
+  if (req.agent.role !== 'admin') return res.status(403).json({ error: 'Admin requis.' });
+  const { period, amount = 10000 } = req.body;
+  const p = period || new Date().toISOString().slice(0, 7);
+  try {
+    const agents = await queryAll("SELECT id, wallet_id FROM agents WHERE role = 'agent' AND active = 1");
+    let created = 0;
+    for (const ag of agents) {
+      const existing = await queryGet('SELECT id FROM invoices WHERE agent_id = ? AND period = ?', [ag.id, p]);
+      if (!existing) {
+        await queryRunInsert(
+          'INSERT INTO invoices (agent_id, wallet_id, period, amount, status) VALUES (?, ?, ?, ?, ?)',
+          [ag.id, ag.wallet_id, p, parseInt(amount, 10), 'pending']
+        );
+        created++;
+      }
+    }
+    res.json({ message: `${created} facture(s) générée(s) pour ${p}`, period: p });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Marquer facture comme payée + débiter le wallet
+app.put('/api/invoices/:id/pay', authMiddleware, async (req, res) => {
+  if (req.agent.role !== 'admin') return res.status(403).json({ error: 'Admin requis.' });
+  try {
+    const inv = await queryGet('SELECT * FROM invoices WHERE id = ?', [req.params.id]);
+    if (!inv) return res.status(404).json({ error: 'Facture introuvable.' });
+    if (inv.status === 'paid') return res.status(400).json({ error: 'Déjà payée.' });
+    await queryRunUpdate('UPDATE wallets SET balance = balance - ? WHERE id = ?', [inv.amount, inv.wallet_id]);
+    await queryRunUpdate(
+      `UPDATE invoices SET status = 'paid', paid_at = ${isPostgres ? 'NOW()' : "datetime('now')"} WHERE id = ?`,
+      [inv.id]
+    );
+    await queryRunInsert(
+      'INSERT INTO balance_ledger (wallet_id, amount, type, description, done_by) VALUES (?, ?, ?, ?, ?)',
+      [inv.wallet_id, -inv.amount, 'ABONNEMENT', `Abonnement ${inv.period}`, req.agent.agentId]
+    );
+    res.json({ message: 'Facture marquée comme payée.' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Historique recharges wallet
+app.get('/api/wallet/ledger', authMiddleware, async (req, res) => {
+  try {
+    const wid = req.agent.role === 'admin' && req.query.walletId
+      ? req.query.walletId : req.agent.walletId;
+    const rows = await queryAll(
+      'SELECT * FROM balance_ledger WHERE wallet_id = ? ORDER BY created_at DESC LIMIT 50',
+      [wid]
+    );
+    res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

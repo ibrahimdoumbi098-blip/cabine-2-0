@@ -484,6 +484,17 @@ function App() {
   const [newAgentBalance, setNewAgentBalance] = useState('');
   const [agentFormMsg, setAgentFormMsg]       = useState('');
 
+  // Admin supervision
+  const [adminOverview, setAdminOverview]     = useState(null);
+  const [adminLoading, setAdminLoading]       = useState(false);
+  const [invoicesList, setInvoicesList]       = useState([]);
+  const [invoicesLoading, setInvoicesLoading] = useState(false);
+  const [rechargeModal, setRechargeModal]     = useState(null);
+  const [rechargeAmount, setRechargeAmount]   = useState('');
+  const [rechargeNote, setRechargeNote]       = useState('');
+  const [rechargeMsg, setRechargeMsg]         = useState('');
+  const [genInvoiceMsg, setGenInvoiceMsg]     = useState('');
+
   // Balance visibility toggle
   const [balanceHidden, setBalanceHidden] = useState(false);
 
@@ -618,6 +629,66 @@ function App() {
     } catch { /* silent */ }
   };
 
+  const fetchAdminOverview = async () => {
+    setAdminLoading(true);
+    try {
+      const res = await apiFetch('/admin/overview');
+      const data = await res.json();
+      setAdminOverview(data);
+    } catch { /* silent */ } finally { setAdminLoading(false); }
+  };
+
+  const fetchAdminInvoices = async () => {
+    setInvoicesLoading(true);
+    try {
+      const res = await apiFetch('/invoices');
+      const data = await res.json();
+      setInvoicesList(Array.isArray(data) ? data : []);
+    } catch { /* silent */ } finally { setInvoicesLoading(false); }
+  };
+
+  const rechargeAgent = async () => {
+    if (!rechargeModal) return;
+    const numAmount = parseInt(rechargeAmount, 10);
+    if (!numAmount || numAmount <= 0) { setRechargeMsg('❌ Montant invalide.'); return; }
+    try {
+      setRechargeMsg('Rechargement en cours...');
+      const res = await apiFetch(`/admin/recharge/${rechargeModal.agentId}`, {
+        method: 'POST',
+        body: JSON.stringify({ amount: numAmount, description: rechargeNote || 'Recharge admin' }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setRechargeMsg(`❌ ${data.error}`); return; }
+      setRechargeMsg(`✅ ${data.message}`);
+      setRechargeAmount('');
+      fetchAdminOverview();
+      setTimeout(() => { setRechargeModal(null); setRechargeMsg(''); }, 1800);
+    } catch (err) { setRechargeMsg(`❌ ${err.message}`); }
+  };
+
+  const generateInvoices = async () => {
+    try {
+      setGenInvoiceMsg('Génération en cours...');
+      const res = await apiFetch('/invoices/generate', { method: 'POST', body: JSON.stringify({}) });
+      const data = await res.json();
+      if (!res.ok) { setGenInvoiceMsg(`❌ ${data.error}`); return; }
+      setGenInvoiceMsg(`✅ ${data.message || 'Factures générées.'}`);
+      fetchAdminInvoices();
+      setTimeout(() => setGenInvoiceMsg(''), 3500);
+    } catch (err) { setGenInvoiceMsg(`❌ ${err.message}`); }
+  };
+
+  const payInvoice = async (id) => {
+    try {
+      const res = await apiFetch(`/invoices/${id}/pay`, { method: 'PUT' });
+      const data = await res.json();
+      if (!res.ok) { addToast('error', 'Erreur', data.error); return; }
+      addToast('success', 'Facture payée', data.message || 'Paiement enregistré.');
+      fetchAdminInvoices();
+      fetchData();
+    } catch (err) { addToast('error', 'Erreur', err.message); }
+  };
+
   const fetchAnalytics = async () => {
     try {
       const res = await apiFetch('/analytics');
@@ -699,6 +770,7 @@ function App() {
   useEffect(() => {
     if (activeTab === 'analytics') fetchAnalytics();
     if (activeTab === 'settings' && authAgent?.role === 'admin') fetchAgents();
+    if (activeTab === 'admin' && authAgent?.role === 'admin') { fetchAdminOverview(); fetchAdminInvoices(); }
   }, [activeTab]);
 
   useEffect(() => {
@@ -1984,6 +2056,246 @@ function App() {
     );
   };
 
+  const renderAdmin = () => {
+    if (!authAgent || authAgent.role !== 'admin') return null;
+    const summary = adminOverview?.summary || {};
+    const agentRows = adminOverview?.agents || [];
+    const fmt = (n) => new Intl.NumberFormat('fr-FR').format(parseInt(n) || 0);
+    const fmtC = (n) => new Intl.NumberFormat('fr-FR', { notation: 'compact', maximumFractionDigits: 1 }).format(parseInt(n) || 0);
+
+    return (
+      <div className="animate-in">
+        <div className="dashboard-header" style={{ marginBottom: '20px' }}>
+          <div className="header-title">
+            <h1>Supervision Admin</h1>
+            <p>Gestion centralisée de la flotte d'agents</p>
+          </div>
+          <button className="export-btn" onClick={() => { fetchAdminOverview(); fetchAdminInvoices(); }}>
+            <RefreshCw size={13} /> Actualiser
+          </button>
+        </div>
+
+        {/* Summary KPI cards */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '14px', marginBottom: '24px' }}>
+          {[
+            { label: 'Agents totaux',   value: summary.totalAgents   || 0,                              icon: <Activity size={20}/>,    bg: 'rgba(99,102,241,0.1)',  color: '#6366f1' },
+            { label: 'Agents actifs',   value: summary.activeAgents  || 0,                              icon: <CheckCircle2 size={20}/>, bg: 'rgba(16,185,129,0.1)',  color: '#10b981' },
+            { label: 'Float total',     value: `${fmtC(summary.totalFloat)} FCFA`,                      icon: <Banknote size={20}/>,     bg: 'rgba(245,158,11,0.1)',  color: '#f59e0b' },
+            { label: "Tx auj.",         value: summary.todayTx       || 0,                              icon: <TrendingUp size={20}/>,   bg: 'rgba(59,130,246,0.1)',  color: '#3b82f6' },
+            { label: "Volume auj.",     value: `${fmtC(summary.todayVolume)} F`,                        icon: <BarChart2 size={20}/>,    bg: 'rgba(16,185,129,0.1)',  color: '#10b981' },
+          ].map((c, i) => (
+            <div key={i} style={{
+              background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '14px',
+              padding: '16px', display: 'flex', alignItems: 'center', gap: '12px',
+            }}>
+              <div style={{ width: 40, height: 40, borderRadius: '10px', background: c.bg, color: c.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                {c.icon}
+              </div>
+              <div>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '2px' }}>{c.label}</div>
+                <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-dark)', lineHeight: 1.2 }}>{c.value}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Agents table */}
+        <div className="card" style={{ marginBottom: '24px' }}>
+          <div className="card-header">
+            <Activity size={16} style={{ marginRight: '8px', verticalAlign: 'middle' }} /> Agents & Soldes
+            {adminLoading && <RefreshCw size={13} style={{ marginLeft: '8px', animation: 'spin 1s linear infinite', verticalAlign: 'middle' }} />}
+          </div>
+          <div className="card-body" style={{ padding: 0 }}>
+            {agentRows.length === 0 ? (
+              <p style={{ padding: '24px', color: 'var(--text-muted)', textAlign: 'center' }}>
+                {adminLoading ? 'Chargement...' : 'Aucun agent trouvé.'}
+              </p>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--border-color)', background: 'var(--bg-hover)' }}>
+                      {['Agent', 'Solde', 'Tx auj.', 'Vol auj.', 'Statut', 'Action'].map(h => (
+                        <th key={h} style={{ padding: '10px 14px', textAlign: h === 'Agent' ? 'left' : 'center', fontWeight: 600, color: 'var(--text-muted)', fontSize: '11px', whiteSpace: 'nowrap' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {agentRows.map(ag => (
+                      <tr key={ag.id} style={{ borderBottom: '1px solid var(--border-color)', opacity: ag.active ? 1 : 0.55 }}>
+                        <td style={{ padding: '12px 14px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div style={{
+                              width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
+                              background: ag.role === 'admin' ? 'linear-gradient(135deg,#6366f1,#8b5cf6)' : 'linear-gradient(135deg,#10b981,#059669)',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 700, fontSize: '11px',
+                            }}>
+                              {ag.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
+                            </div>
+                            <div>
+                              <div style={{ fontWeight: 600, color: 'var(--text-dark)' }}>
+                                {ag.name}
+                                {ag.role === 'admin' && <span style={{ marginLeft: '6px', fontSize: '10px', background: 'rgba(99,102,241,0.12)', color: 'var(--accent-primary)', padding: '1px 6px', borderRadius: '10px' }}>Admin</span>}
+                              </div>
+                              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{ag.email}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td style={{ padding: '12px 14px', textAlign: 'center', fontWeight: 700, color: 'var(--text-dark)', whiteSpace: 'nowrap' }}>
+                          {fmt(ag.balance)} F
+                        </td>
+                        <td style={{ padding: '12px 14px', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                          {ag.today_tx || 0}
+                        </td>
+                        <td style={{ padding: '12px 14px', textAlign: 'center', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                          {fmtC(ag.today_volume)} F
+                        </td>
+                        <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                          <span style={{
+                            fontSize: '11px', fontWeight: 600, padding: '3px 10px', borderRadius: '20px',
+                            background: ag.active ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)',
+                            color: ag.active ? 'var(--accent-green)' : 'var(--accent-red)',
+                          }}>
+                            {ag.active ? '● Actif' : '● Suspendu'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                          <button
+                            className="btn-primary"
+                            style={{ fontSize: '12px', padding: '5px 12px', background: '#10b981', whiteSpace: 'nowrap' }}
+                            onClick={() => {
+                              setRechargeModal({ agentId: ag.id, agentName: ag.name, currentBalance: ag.balance });
+                              setRechargeAmount(''); setRechargeNote(''); setRechargeMsg('');
+                            }}
+                          >
+                            + Recharger
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Invoices section */}
+        <div className="card" style={{ marginBottom: '32px' }}>
+          <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+            <span><Banknote size={16} style={{ marginRight: '8px', verticalAlign: 'middle' }} /> Facturation mensuelle</span>
+            <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+              {genInvoiceMsg && (
+                <span style={{ fontSize: '13px', color: genInvoiceMsg.startsWith('✅') ? 'var(--accent-green)' : genInvoiceMsg.includes('cours') ? 'var(--text-muted)' : 'var(--accent-red)' }}>
+                  {genInvoiceMsg}
+                </span>
+              )}
+              <button className="btn-primary" style={{ fontSize: '12px', padding: '6px 16px' }} onClick={generateInvoices}>
+                Générer factures du mois
+              </button>
+            </div>
+          </div>
+          <div className="card-body" style={{ padding: 0 }}>
+            {invoicesLoading ? (
+              <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} /> Chargement...
+              </div>
+            ) : invoicesList.length === 0 ? (
+              <p style={{ padding: '24px', color: 'var(--text-muted)', textAlign: 'center', fontSize: '14px' }}>
+                Aucune facture. Cliquez sur "Générer factures du mois" pour créer les abonnements mensuels (10 000 FCFA / agent).
+              </p>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--border-color)', background: 'var(--bg-hover)' }}>
+                      {['Agent', 'Période', 'Montant', 'Statut', 'Action'].map(h => (
+                        <th key={h} style={{ padding: '10px 14px', textAlign: h === 'Agent' ? 'left' : 'center', fontWeight: 600, color: 'var(--text-muted)', fontSize: '11px' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {invoicesList.map(inv => (
+                      <tr key={inv.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                        <td style={{ padding: '12px 14px' }}>
+                          <div style={{ fontWeight: 600, color: 'var(--text-dark)' }}>{inv.agent_name}</div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{inv.email}</div>
+                        </td>
+                        <td style={{ padding: '12px 14px', textAlign: 'center', color: 'var(--text-secondary)' }}>{inv.period}</td>
+                        <td style={{ padding: '12px 14px', textAlign: 'center', fontWeight: 700, whiteSpace: 'nowrap' }}>{fmt(inv.amount)} FCFA</td>
+                        <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                          <span style={{
+                            fontSize: '11px', fontWeight: 600, padding: '3px 10px', borderRadius: '20px',
+                            background: inv.status === 'paid' ? 'rgba(16,185,129,0.12)' : 'rgba(245,158,11,0.12)',
+                            color: inv.status === 'paid' ? 'var(--accent-green)' : 'var(--accent-yellow)',
+                          }}>
+                            {inv.status === 'paid' ? '✓ Payée' : '⏳ En attente'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                          {inv.status !== 'paid' ? (
+                            <button className="btn-primary" style={{ fontSize: '12px', padding: '5px 12px' }} onClick={() => payInvoice(inv.id)}>
+                              Marquer payée
+                            </button>
+                          ) : (
+                            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                              {inv.paid_at ? new Date(inv.paid_at).toLocaleDateString('fr-FR') : '—'}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Recharge Modal */}
+        {rechargeModal && (
+          <div className="modal-overlay">
+            <div className="confirm-modal" style={{ '--confirm-color': '#10b981' }}>
+              <div className="confirm-modal-icon" style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981' }}>
+                <Banknote size={22} />
+              </div>
+              <h3>Recharger l'agent</h3>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginBottom: '16px' }}>
+                {rechargeModal.agentName} — Solde actuel : {fmt(rechargeModal.currentBalance)} FCFA
+              </p>
+              <div className="form-group" style={{ marginBottom: '12px' }}>
+                <label>Montant à créditer (FCFA)</label>
+                <input
+                  type="number" placeholder="Ex: 50 000" min="100"
+                  value={rechargeAmount} onChange={e => setRechargeAmount(e.target.value)}
+                  style={{ textAlign: 'right' }} autoFocus
+                />
+              </div>
+              <div className="form-group" style={{ marginBottom: '16px' }}>
+                <label>Note (optionnel)</label>
+                <input
+                  type="text" placeholder="Virement, dépôt cash, etc."
+                  value={rechargeNote} onChange={e => setRechargeNote(e.target.value)}
+                />
+              </div>
+              {rechargeMsg && (
+                <p style={{ fontSize: '13px', marginBottom: '12px', color: rechargeMsg.startsWith('✅') ? 'var(--accent-green)' : rechargeMsg.includes('cours') ? 'var(--text-muted)' : 'var(--accent-red)' }}>
+                  {rechargeMsg}
+                </p>
+              )}
+              <div className="confirm-actions">
+                <button className="btn-secondary" onClick={() => { setRechargeModal(null); setRechargeMsg(''); }}>Annuler</button>
+                <button className="btn-primary" style={{ background: '#10b981' }} onClick={rechargeAgent}>
+                  Confirmer la recharge
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // Auth gate
   if (!authChecked) return null;
   if (!authAgent) return <LoginScreen onLogin={agent => setAuthAgent(agent)} />;
@@ -2054,6 +2366,7 @@ function App() {
                 { id: 'dashboard',    icon: <LayoutDashboard size={20}/>, label: 'Tableau de bord' },
                 { id: 'transactions', icon: <History size={20}/>,         label: 'Transactions' },
                 { id: 'analytics',    icon: <BarChart2 size={20}/>,       label: 'Analytiques' },
+                ...(authAgent?.role === 'admin' ? [{ id: 'admin', icon: <ShieldCheck size={20}/>, label: 'Supervision' }] : []),
                 { id: 'settings',     icon: <Settings size={20}/>,        label: 'Paramètres' },
               ].map(item => (
                 <div
@@ -2122,6 +2435,7 @@ function App() {
             {activeTab === 'dashboard' && renderDashboard()}
             {activeTab === 'transactions' && renderTransactions()}
             {activeTab === 'analytics' && renderAnalytics()}
+            {activeTab === 'admin' && renderAdmin()}
             {activeTab === 'settings' && renderSettings()}
           </main>
 
@@ -2352,6 +2666,15 @@ function App() {
               <div className="bnav-icon"><BarChart2 size={20} /></div>
               <span>Stats</span>
             </button>
+            {authAgent?.role === 'admin' && (
+              <button
+                className={`bottom-nav-item${activeTab === 'admin' ? ' active' : ''}`}
+                onClick={() => setActiveTab('admin')}
+              >
+                <div className="bnav-icon"><ShieldCheck size={20} /></div>
+                <span>Admin</span>
+              </button>
+            )}
             <button
               className={`bottom-nav-item${activeTab === 'settings' ? ' active' : ''}`}
               onClick={() => setActiveTab('settings')}
