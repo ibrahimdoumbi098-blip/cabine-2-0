@@ -497,6 +497,7 @@ function App() {
 
   // Commission config
   const [commissions, setCommissions] = useState({ transfer: 2, withdraw: 2, airtime: 2, internet: 2 });
+  const [localRates, setLocalRates]   = useState({ transfer: 2, withdraw: 2, airtime: 2, internet: 2 });
   const [commissionSaving, setCommissionSaving] = useState({}); // { [type]: bool }
 
   // Balance visibility toggle
@@ -595,6 +596,7 @@ function App() {
         const map = {};
         data.forEach(c => { map[c.type] = parseFloat(c.rate_percent) ?? 2; });
         setCommissions(prev => ({ ...prev, ...map }));
+        setLocalRates(prev => ({ ...prev, ...map }));
       }
     } catch { /* keep defaults */ }
   };
@@ -2341,41 +2343,38 @@ function App() {
                 { type: 'withdraw', label: 'Retrait',     icon: <ArrowDownToLine size={16}/>, color: '#10b981' },
                 { type: 'airtime',  label: 'Crédit tél.', icon: <PhoneCall size={16}/>,       color: '#f59e0b' },
                 { type: 'internet', label: 'Internet',    icon: <Wifi size={16}/>,            color: '#3b82f6' },
-              ].map(({ type, label, icon, color }) => {
-                const [localRate, setLocalRate] = React.useState(commissions[type] ?? 2);
-                return (
-                  <div key={type} style={{
-                    padding: '14px', borderRadius: '12px', border: '1px solid var(--border-color)',
-                    background: 'var(--bg-hover)', display: 'flex', flexDirection: 'column', gap: '10px',
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color }}>
-                      {icon}
-                      <span style={{ fontWeight: 600, fontSize: '14px', color: 'var(--text-dark)' }}>{label}</span>
-                      <span style={{ marginLeft: 'auto', fontSize: '18px', fontWeight: 800, color }}>{commissions[type]}%</span>
-                    </div>
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                      <input
-                        type="number"
-                        min="0" max="20" step="0.5"
-                        defaultValue={commissions[type]}
-                        onChange={e => setLocalRate(parseFloat(e.target.value) || 0)}
-                        style={{ flex: 1, textAlign: 'center', fontWeight: 700 }}
-                      />
-                      <button
-                        className="btn-primary"
-                        style={{ fontSize: '12px', padding: '6px 14px', background: color, opacity: commissionSaving[type] ? 0.6 : 1 }}
-                        disabled={commissionSaving[type]}
-                        onClick={() => saveCommission(type, localRate)}
-                      >
-                        {commissionSaving[type] ? <RefreshCw size={12} style={{ animation: 'spin 1s linear infinite' }} /> : 'Enregistrer'}
-                      </button>
-                    </div>
-                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                      Sur 10 000 FCFA → collectez <strong>{Math.round(10000 * (commissions[type] / 100 + 1)).toLocaleString('fr-FR')} FCFA</strong>
-                    </div>
+              ].map(({ type, label, icon, color }) => (
+                <div key={type} style={{
+                  padding: '14px', borderRadius: '12px', border: '1px solid var(--border-color)',
+                  background: 'var(--bg-hover)', display: 'flex', flexDirection: 'column', gap: '10px',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {icon}
+                    <span style={{ fontWeight: 600, fontSize: '14px', color: 'var(--text-dark)' }}>{label}</span>
+                    <span style={{ marginLeft: 'auto', fontSize: '18px', fontWeight: 800, color }}>{commissions[type]}%</span>
                   </div>
-                );
-              })}
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <input
+                      type="number"
+                      min="0" max="20" step="0.5"
+                      value={localRates[type] ?? 2}
+                      onChange={e => setLocalRates(prev => ({ ...prev, [type]: parseFloat(e.target.value) || 0 }))}
+                      style={{ flex: 1, textAlign: 'center', fontWeight: 700 }}
+                    />
+                    <button
+                      className="btn-primary"
+                      style={{ fontSize: '12px', padding: '6px 14px', background: color, opacity: commissionSaving[type] ? 0.6 : 1 }}
+                      disabled={!!commissionSaving[type]}
+                      onClick={() => saveCommission(type, localRates[type] ?? 2)}
+                    >
+                      {commissionSaving[type] ? <RefreshCw size={12} style={{ animation: 'spin 1s linear infinite' }} /> : 'Enregistrer'}
+                    </button>
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                    Sur 10 000 FCFA → collectez <strong>{Math.round(10000 * ((localRates[type] ?? 2) / 100 + 1)).toLocaleString('fr-FR')} FCFA</strong>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>
