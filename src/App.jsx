@@ -306,7 +306,138 @@ function HourlyHeatmap({ hourly }) {
   );
 }
 
+// === LOGIN SCREEN ===
+function LoginScreen({ onLogin }) {
+  const [email, setEmail]       = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError]       = useState('');
+  const [loading, setLoading]   = useState(false);
+  const [showPwd, setShowPwd]   = useState(false);
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoading(true); setError('');
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error || 'Connexion échouée.'); return; }
+      localStorage.setItem('cabine_token', data.token);
+      onLogin(data.agent);
+    } catch {
+      setError('Impossible de joindre le serveur. Vérifiez votre connexion.');
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <div style={{
+      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'var(--bg-main)', padding: '20px',
+    }}>
+      <div style={{
+        width: '100%', maxWidth: '420px', background: 'var(--bg-card)',
+        borderRadius: '20px', padding: '40px 36px',
+        boxShadow: 'var(--shadow-xl)', animation: 'scaleIn 0.3s ease forwards',
+      }}>
+        {/* Brand */}
+        <div style={{textAlign: 'center', marginBottom: '32px'}}>
+          <div style={{
+            width: 60, height: 60, borderRadius: '16px',
+            background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            margin: '0 auto 16px', boxShadow: '0 8px 24px rgba(99,102,241,0.35)',
+          }}>
+            <Zap size={28} fill="white" color="white" />
+          </div>
+          <h1 style={{fontSize: '24px', fontWeight: 800, color: 'var(--text-dark)', marginBottom: '4px'}}>
+            Cabine 2.0
+          </h1>
+          <p style={{color: 'var(--text-secondary)', fontSize: '14px'}}>
+            Plateforme Fintech — Côte d'Ivoire
+          </p>
+        </div>
+
+        {/* Form */}
+        <form onSubmit={handleLogin}>
+          <div className="form-group" style={{marginBottom: '16px'}}>
+            <label style={{fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px', display: 'block'}}>
+              Adresse email
+            </label>
+            <input
+              type="email" required autoFocus
+              placeholder="exemple@email.com"
+              value={email} onChange={e => setEmail(e.target.value)}
+            />
+          </div>
+          <div className="form-group" style={{marginBottom: '24px', position: 'relative'}}>
+            <label style={{fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px', display: 'block'}}>
+              Mot de passe
+            </label>
+            <input
+              type={showPwd ? 'text' : 'password'} required
+              placeholder="••••••••"
+              value={password} onChange={e => setPassword(e.target.value)}
+              style={{paddingRight: '44px'}}
+            />
+            <button type="button" onClick={() => setShowPwd(p => !p)}
+              style={{position: 'absolute', right: '12px', bottom: '12px', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer'}}>
+              {showPwd ? <EyeOff size={18}/> : <Eye size={18}/>}
+            </button>
+          </div>
+
+          {error && (
+            <div style={{
+              background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
+              borderRadius: '10px', padding: '12px 14px', marginBottom: '16px',
+              color: 'var(--accent-red)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px',
+            }}>
+              <AlertTriangle size={15}/> {error}
+            </div>
+          )}
+
+          <button type="submit" className="submit-btn" disabled={loading} style={{width: '100%'}}>
+            {loading
+              ? <><RefreshCw size={16} style={{animation: 'spin 1s linear infinite'}}/> Connexion...</>
+              : <><Zap size={16}/> Se connecter</>
+            }
+          </button>
+        </form>
+
+        <p style={{textAlign: 'center', marginTop: '24px', fontSize: '12px', color: 'var(--text-muted)'}}>
+          Cabine 2.0 — Accès réservé aux agents autorisés
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function App() {
+  // Auth
+  const [authAgent, setAuthAgent]           = useState(null);
+  const [authChecked, setAuthChecked]       = useState(false);
+
+  const getToken = () => localStorage.getItem('cabine_token');
+  const authHeaders = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` });
+
+  const handleLogout = () => {
+    localStorage.removeItem('cabine_token');
+    setAuthAgent(null);
+  };
+
+  // Validate token on mount
+  useEffect(() => {
+    const token = getToken();
+    if (!token) { setAuthChecked(true); return; }
+    fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(agent => { if (agent) setAuthAgent(agent); })
+      .catch(() => {})
+      .finally(() => setAuthChecked(true));
+  }, []);
+
   const [activeTab, setActiveTab] = useState('dashboard');
   const [selectedProvider, setSelectedProvider] = useState('orange');
   const [amount, setAmount] = useState('');
@@ -432,9 +563,18 @@ function App() {
     } catch (e) { /* keep fallback */ }
   };
 
+  const apiFetch = useCallback(async (path, options = {}) => {
+    const res = await fetch(`${API_URL}${path}`, {
+      ...options,
+      headers: { ...authHeaders(), ...(options.headers || {}) },
+    });
+    if (res.status === 401) { handleLogout(); throw new Error('Session expirée'); }
+    return res;
+  }, []);
+
   const fetchAnalytics = async () => {
     try {
-      const res = await fetch(`${API_URL}/analytics`);
+      const res = await apiFetch('/analytics');
       const data = await res.json();
       setAnalytics(data);
     } catch (e) { /* silent */ }
@@ -452,7 +592,7 @@ function App() {
 
   const fetchData = async () => {
     try {
-      const walletRes = await fetch(`${API_URL}/wallet`);
+      const walletRes = await apiFetch('/wallet');
       const walletData = await walletRes.json();
       setBalance(walletData.balance);
       setAgentName(walletData.agent_name);
@@ -465,7 +605,7 @@ function App() {
       if (transactionSince) queryParams.set('since', transactionSince);
       if (transactionUntil) queryParams.set('until', transactionUntil);
 
-      const txRes = await fetch(`${API_URL}/transactions?${queryParams.toString()}`);
+      const txRes = await apiFetch(`/transactions?${queryParams.toString()}`);
       const txData = await txRes.json();
       setTransactions(txData);
 
@@ -615,9 +755,8 @@ function App() {
         body.bundle = capturedBundle;
       }
 
-      const response = await fetch(cfg.endpoint, {
+      const response = await apiFetch(cfg.endpoint.replace(API_URL, ''), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
 
@@ -661,9 +800,8 @@ function App() {
     setPinUpdateMessage('Mise à jour en cours...');
     
     try {
-      const response = await fetch(`${API_URL}/wallet/pin`, {
+      const response = await apiFetch('/wallet/pin', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ oldPin, newPin }),
       });
 
@@ -1672,6 +1810,10 @@ function App() {
     );
   };
 
+  // Auth gate
+  if (!authChecked) return null;
+  if (!authAgent) return <LoginScreen onLogin={agent => setAuthAgent(agent)} />;
+
   return (
     <div className="app-container">
       {isLoading ? (
@@ -1768,7 +1910,7 @@ function App() {
                     >
                       {darkMode ? '☀️' : '🌙'}
                     </button>
-                    <LogOut size={18} color="#ef4444" style={{cursor:'pointer'}}/>
+                    <LogOut size={18} color="#ef4444" style={{cursor:'pointer'}} onClick={handleLogout} title="Déconnexion"/>
                   </div>
                 </>
               )}
@@ -1781,7 +1923,7 @@ function App() {
                   >
                     {darkMode ? '☀️' : '🌙'}
                   </button>
-                  <LogOut size={18} color="#ef4444" style={{cursor:'pointer'}} title="Déconnexion"/>
+                  <LogOut size={18} color="#ef4444" style={{cursor:'pointer'}} onClick={handleLogout} title="Déconnexion"/>
                 </div>
               )}
             </div>

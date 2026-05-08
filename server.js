@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import crypto from 'crypto';
 import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import sqlite3 from 'sqlite3';
 import pg from 'pg';
@@ -263,6 +264,7 @@ const GENIUSPAY_API_KEY = process.env.GENIUSPAY_API_KEY || '';
 const GENIUSPAY_WALLET_ID = process.env.GENIUSPAY_WALLET_ID || '';
 const GENIUSPAY_WEBHOOK_SECRET = process.env.GENIUSPAY_WEBHOOK_SECRET || '';
 const GENIUSPAY_MODE = process.env.GENIUSPAY_MODE || 'sandbox';
+const JWT_SECRET = process.env.JWT_SECRET || 'cabine2-secret-change-in-prod-2026';
 
 let discoveredWalletId = GENIUSPAY_WALLET_ID;
 let geniusPayConnected = false;
@@ -354,6 +356,26 @@ async function initDb() {
     id INTEGER PRIMARY KEY AUTOINCREMENT, agent_name TEXT,
     balance INTEGER DEFAULT 0, pin TEXT DEFAULT '1234'
   )`;
+  const agentsPg = `CREATE TABLE IF NOT EXISTS agents (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    role VARCHAR(50) DEFAULT 'agent',
+    wallet_id INTEGER REFERENCES wallets(id),
+    active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`;
+  const agentsSqlite = `CREATE TABLE IF NOT EXISTS agents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    role TEXT DEFAULT 'agent',
+    wallet_id INTEGER,
+    active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`;
   const txPg = `CREATE TABLE IF NOT EXISTS transactions (
     id SERIAL PRIMARY KEY, wallet_id INTEGER, type VARCHAR(50),
     provider VARCHAR(50), phone VARCHAR(50), amount INTEGER,
@@ -371,28 +393,54 @@ async function initDb() {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`;
 
+  const IBRAHIM_EMAIL = 'ibrahim.doumbi098@gmail.com';
+  const IBRAHIM_DEFAULT_PASS = 'Cabine2025!';
+
   try {
     if (isPostgres) {
       await pool.query(walletsPg);
       await pool.query(txPg);
+      await pool.query(agentsPg);
       const res = await pool.query('SELECT * FROM wallets WHERE id = 1');
       if (res.rows.length === 0) {
         await pool.query('INSERT INTO wallets (id, agent_name, balance, pin) VALUES (1, $1, $2, $3)', ['Ibrahim Doumbia', 2450000, '1234']);
       } else if (res.rows[0].agent_name === 'Kouassi B.') {
         await pool.query('UPDATE wallets SET agent_name = $1 WHERE id = 1', ['Ibrahim Doumbia']);
       }
+      // Seed Ibrahim as admin agent if not exists
+      const agentRes = await pool.query('SELECT id FROM agents WHERE email = $1', [IBRAHIM_EMAIL]);
+      if (agentRes.rows.length === 0) {
+        const hash = await bcrypt.hash(IBRAHIM_DEFAULT_PASS, BCRYPT_ROUNDS);
+        await pool.query(
+          'INSERT INTO agents (name, email, password_hash, role, wallet_id) VALUES ($1, $2, $3, $4, $5)',
+          ['Ibrahim Doumbia', IBRAHIM_EMAIL, hash, 'admin', 1]
+        );
+        console.log('👤 Agent admin Ibrahim créé — email:', IBRAHIM_EMAIL);
+      }
     } else {
       await new Promise((resolve) => {
         sqliteDb.serialize(() => {
           sqliteDb.run(walletsSqlite);
           sqliteDb.run(txSqlite);
+          sqliteDb.run(agentsSqlite);
           sqliteDb.get('SELECT * FROM wallets WHERE id = 1', (err, row) => {
             if (!row) {
               sqliteDb.run('INSERT INTO wallets (agent_name, balance, pin) VALUES (?, ?, ?)', ['Ibrahim Doumbia', 2450000, '1234']);
             } else if (row.agent_name === 'Kouassi B.') {
               sqliteDb.run('UPDATE wallets SET agent_name = ? WHERE id = 1', ['Ibrahim Doumbia']);
             }
-            resolve();
+            // Seed Ibrahim as admin agent
+            sqliteDb.get('SELECT id FROM agents WHERE email = ?', [IBRAHIM_EMAIL], async (err2, agentRow) => {
+              if (!agentRow) {
+                const hash = await bcrypt.hash(IBRAHIM_DEFAULT_PASS, BCRYPT_ROUNDS);
+                sqliteDb.run(
+                  'INSERT INTO agents (name, email, password_hash, role, wallet_id) VALUES (?, ?, ?, ?, ?)',
+                  ['Ibrahim Doumbia', IBRAHIM_EMAIL, hash, 'admin', 1]
+                );
+                console.log('👤 Agent admin Ibrahim créé — email:', IBRAHIM_EMAIL);
+              }
+              resolve();
+            });
           });
         });
       });
@@ -644,6 +692,97 @@ function validateOperationInput(provider, phone, amount, pin) {
 // ==========================================
 
 // Forfaits opérateurs — servis côté serveur pour mise à jour centralisée
+// ==========================================
+// AUTH MIDDLEWARE + ROUTES
+// ==========================================
+function authMiddleware(req, res, next) {
+  const token = req.headers.authorization?.replace('Bearer ', '').trim();
+  if (!token) return res.status(401).json({ error: 'Non authentifié. Connectez-vous.' });
+  try {
+    req.agent = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch {
+    res.status(401).json({ error: 'Session expirée. Reconnectez-vous.' });
+  }
+}
+
+// Login
+app.post('/api/auth/login', async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) return res.status(400).json({ error: 'Email et mot de passe requis.' });
+  try {
+    const agent = await queryGet('SELECT * FROM agents WHERE email = ? AND active = 1', [email.toLowerCase().trim()]);
+    if (!agent) return res.status(401).json({ error: 'Email ou mot de passe incorrect.' });
+    const valid = await bcrypt.compare(password, agent.password_hash);
+    if (!valid) return res.status(401).json({ error: 'Email ou mot de passe incorrect.' });
+    const token = jwt.sign(
+      { agentId: agent.id, name: agent.name, email: agent.email, role: agent.role, walletId: agent.wallet_id },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+    log('INFO', 'Login réussi', { agent: agent.email, role: agent.role });
+    res.json({ token, agent: { id: agent.id, name: agent.name, email: agent.email, role: agent.role, walletId: agent.wallet_id } });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Me
+app.get('/api/auth/me', authMiddleware, async (req, res) => {
+  try {
+    const agent = await queryGet('SELECT id, name, email, role, wallet_id FROM agents WHERE id = ?', [req.agent.agentId]);
+    if (!agent) return res.status(404).json({ error: 'Agent introuvable.' });
+    res.json({ ...agent, walletId: agent.wallet_id });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Register (admin only)
+app.post('/api/auth/register', authMiddleware, async (req, res) => {
+  if (req.agent.role !== 'admin') return res.status(403).json({ error: 'Accès administrateur requis.' });
+  const { name, email, password, initialBalance = 0 } = req.body;
+  if (!name || !email || !password) return res.status(400).json({ error: 'Nom, email et mot de passe requis.' });
+  try {
+    // Create wallet for new agent
+    const walletId = await queryRunInsert(
+      'INSERT INTO wallets (agent_name, balance, pin) VALUES (?, ?, ?)',
+      [name, parseInt(initialBalance, 10), '1234']
+    );
+    const hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    const agentId = await queryRunInsert(
+      'INSERT INTO agents (name, email, password_hash, role, wallet_id) VALUES (?, ?, ?, ?, ?)',
+      [name, email.toLowerCase().trim(), hash, 'agent', walletId]
+    );
+    log('INFO', 'Nouvel agent créé', { name, email, walletId, by: req.agent.email });
+    res.json({ id: agentId, name, email, walletId, message: 'Agent créé avec succès. PIN par défaut: 1234' });
+  } catch (err) {
+    if (err.message?.includes('UNIQUE') || err.code === '23505') {
+      return res.status(400).json({ error: 'Cet email est déjà utilisé.' });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// List agents (admin only)
+app.get('/api/agents', authMiddleware, async (req, res) => {
+  if (req.agent.role !== 'admin') return res.status(403).json({ error: 'Accès administrateur requis.' });
+  try {
+    const agents = await queryAll(
+      'SELECT a.id, a.name, a.email, a.role, a.active, a.created_at, w.balance FROM agents a LEFT JOIN wallets w ON a.wallet_id = w.id ORDER BY a.created_at ASC'
+    );
+    res.json(agents);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Toggle agent active (admin only)
+app.put('/api/agents/:id/toggle', authMiddleware, async (req, res) => {
+  if (req.agent.role !== 'admin') return res.status(403).json({ error: 'Accès administrateur requis.' });
+  try {
+    const agent = await queryGet('SELECT id, active FROM agents WHERE id = ?', [req.params.id]);
+    if (!agent) return res.status(404).json({ error: 'Agent introuvable.' });
+    const newActive = agent.active ? 0 : 1;
+    await queryRunUpdate('UPDATE agents SET active = ? WHERE id = ?', [newActive, req.params.id]);
+    res.json({ active: !!newActive });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/bundles', (req, res) => {
   res.setHeader('Cache-Control', 'public, max-age=3600'); // cache 1h
   res.json(OPERATOR_BUNDLES);
@@ -710,20 +849,20 @@ app.get('/api/health', async (req, res) => {
 });
 
 // Wallet balance
-app.get('/api/wallet', async (req, res) => {
+app.get('/api/wallet', authMiddleware, async (req, res) => {
   try {
-    const row = await queryGet('SELECT id, agent_name, balance FROM wallets WHERE id = 1');
+    const row = await queryGet('SELECT id, agent_name, balance FROM wallets WHERE id = ?', [req.agent.walletId]);
     res.json(row);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // Transaction history
-app.get('/api/transactions', async (req, res) => {
+app.get('/api/transactions', authMiddleware, async (req, res) => {
   try {
     const { status, q, since, until, limit = 50 } = req.query;
     let sql = 'SELECT * FROM transactions';
-    const filters = [];
-    const params = [];
+    const filters = ['wallet_id = ?'];
+    const params = [req.agent.walletId];
 
     if (status && status !== 'all') {
       const normalized = status.toUpperCase();
@@ -756,9 +895,9 @@ app.get('/api/transactions', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/transactions/export', async (req, res) => {
+app.get('/api/transactions/export', authMiddleware, async (req, res) => {
   try {
-    const rows = await queryAll('SELECT * FROM transactions ORDER BY created_at DESC LIMIT 1000');
+    const rows = await queryAll('SELECT * FROM transactions WHERE wallet_id = ? ORDER BY created_at DESC LIMIT 1000', [req.agent.walletId]);
     const header = ['Date','Référence','Opérateur','Téléphone','Montant','Statut','GeniusPay Ref'];
     const lines = rows.map(tx => [
       new Date(tx.created_at).toLocaleString('fr-FR'),
@@ -780,39 +919,39 @@ app.get('/api/transactions/export', async (req, res) => {
 });
 
 // Change PIN
-app.put('/api/wallet/pin', async (req, res) => {
+app.put('/api/wallet/pin', authMiddleware, async (req, res) => {
   const { oldPin, newPin } = req.body;
   if (!oldPin || !newPin) return res.status(400).json({ error: 'Données invalides.' });
   try {
-    const wallet = await queryGet('SELECT pin FROM wallets WHERE id = 1');
-    if (!(await verifyPin(1, wallet.pin, oldPin))) return res.status(403).json({ error: 'Ancien code PIN incorrect.' });
+    const wid = req.agent.walletId;
+    const wallet = await queryGet('SELECT pin FROM wallets WHERE id = ?', [wid]);
+    if (!(await verifyPin(wid, wallet.pin, oldPin))) return res.status(403).json({ error: 'Ancien code PIN incorrect.' });
     const hash = await bcrypt.hash(newPin, BCRYPT_ROUNDS);
-    await queryRunUpdate('UPDATE wallets SET pin = ? WHERE id = 1', [hash]);
+    await queryRunUpdate('UPDATE wallets SET pin = ? WHERE id = ?', [hash, wid]);
     res.json({ message: 'Code PIN mis à jour avec succès.' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // === TRANSFER — Cœur du système ===
-app.post('/api/transfer', rateLimiter, async (req, res) => {
+app.post('/api/transfer', rateLimiter, authMiddleware, async (req, res) => {
   const { provider, phone, amount, pin } = req.body;
   const numAmount = parseInt(amount, 10);
+  const wid = req.agent.walletId;
 
   const validationError = validateOperationInput(provider, phone, numAmount, pin);
   if (validationError) return res.status(400).json({ error: validationError });
 
   try {
-    const wallet = await queryGet('SELECT balance, pin FROM wallets WHERE id = 1');
-    if (!(await verifyPin(1, wallet.pin, pin))) return res.status(403).json({ error: 'Code PIN incorrect. Transaction refusée.' });
+    const wallet = await queryGet('SELECT balance, pin FROM wallets WHERE id = ?', [wid]);
+    if (!(await verifyPin(wid, wallet.pin, pin))) return res.status(403).json({ error: 'Code PIN incorrect. Transaction refusée.' });
     if (wallet.balance < numAmount) return res.status(400).json({ error: 'Solde insuffisant.' });
 
-    // Débit immédiat
     const newBalance = wallet.balance - numAmount;
-    await queryRunUpdate('UPDATE wallets SET balance = ? WHERE id = 1', [newBalance]);
+    await queryRunUpdate('UPDATE wallets SET balance = ? WHERE id = ?', [newBalance, wid]);
 
-    // Créer la transaction
     const txId = await queryRunInsert(
       'INSERT INTO transactions (wallet_id, type, provider, phone, amount, status) VALUES (?, ?, ?, ?, ?, ?)',
-      [1, 'TRANSFER', provider, phone, numAmount, 'PENDING']
+      [wid, 'TRANSFER', provider, phone, numAmount, 'PENDING']
     );
 
     // Répondre immédiatement au client
@@ -854,24 +993,24 @@ app.post('/api/transfer', rateLimiter, async (req, res) => {
 });
 
 // === RETRAIT — Encaissement client ===
-app.post('/api/retrait', rateLimiter, async (req, res) => {
+app.post('/api/retrait', rateLimiter, authMiddleware, async (req, res) => {
   const { provider, phone, amount, pin } = req.body;
   const numAmount = parseInt(amount, 10);
+  const wid = req.agent.walletId;
 
   const validationError = validateOperationInput(provider, phone, numAmount, pin);
   if (validationError) return res.status(400).json({ error: validationError });
 
   try {
-    const wallet = await queryGet('SELECT balance, pin FROM wallets WHERE id = 1');
-    if (!(await verifyPin(1, wallet.pin, pin)))
+    const wallet = await queryGet('SELECT balance, pin FROM wallets WHERE id = ?', [wid]);
+    if (!(await verifyPin(wid, wallet.pin, pin)))
       return res.status(403).json({ error: 'Code PIN incorrect. Opération refusée.' });
 
-    // Crédit immédiat du wallet agent
-    await queryRunUpdate('UPDATE wallets SET balance = balance + ? WHERE id = 1', [numAmount]);
+    await queryRunUpdate('UPDATE wallets SET balance = balance + ? WHERE id = ?', [numAmount, wid]);
 
     const txId = await queryRunInsert(
       'INSERT INTO transactions (wallet_id, type, provider, phone, amount, status) VALUES (?, ?, ?, ?, ?, ?)',
-      [1, 'RETRAIT', provider, phone, numAmount, 'PENDING']
+      [wid, 'RETRAIT', provider, phone, numAmount, 'PENDING']
     );
 
     // Répondre immédiatement
@@ -892,8 +1031,7 @@ app.post('/api/retrait', rateLimiter, async (req, res) => {
       log('INFO', `Retrait TX ${txId} SUCCÈS`, { ref, amount: numAmount, provider });
     } else {
       await queryRunUpdate('UPDATE transactions SET status = ? WHERE id = ?', ['FAILED', txId]);
-      // Annuler le crédit si échec
-      await queryRunUpdate('UPDATE wallets SET balance = balance - ? WHERE id = 1', [numAmount]);
+      await queryRunUpdate('UPDATE wallets SET balance = balance - ? WHERE id = ?', [numAmount, wid]);
       log('WARN', `Retrait TX ${txId} ÉCHEC. Crédit annulé.`);
     }
   } catch (err) {
@@ -903,26 +1041,27 @@ app.post('/api/retrait', rateLimiter, async (req, res) => {
 });
 
 // === AIRTIME — Recharge crédit téléphonique ===
-app.post('/api/airtime', rateLimiter, async (req, res) => {
+app.post('/api/airtime', rateLimiter, authMiddleware, async (req, res) => {
   const { provider, phone, amount, pin } = req.body;
   const numAmount = parseInt(amount, 10);
+  const wid = req.agent.walletId;
 
   const validationError = validateOperationInput(provider, phone, numAmount, pin);
   if (validationError) return res.status(400).json({ error: validationError });
 
   try {
-    const wallet = await queryGet('SELECT balance, pin FROM wallets WHERE id = 1');
-    if (!(await verifyPin(1, wallet.pin, pin)))
+    const wallet = await queryGet('SELECT balance, pin FROM wallets WHERE id = ?', [wid]);
+    if (!(await verifyPin(wid, wallet.pin, pin)))
       return res.status(403).json({ error: 'Code PIN incorrect. Opération refusée.' });
     if (wallet.balance < numAmount)
       return res.status(400).json({ error: 'Solde insuffisant.' });
 
     const newBalance = wallet.balance - numAmount;
-    await queryRunUpdate('UPDATE wallets SET balance = ? WHERE id = 1', [newBalance]);
+    await queryRunUpdate('UPDATE wallets SET balance = ? WHERE id = ?', [newBalance, wid]);
 
     const txId = await queryRunInsert(
       'INSERT INTO transactions (wallet_id, type, provider, phone, amount, status) VALUES (?, ?, ?, ?, ?, ?)',
-      [1, 'AIRTIME', provider, phone, numAmount, 'PENDING']
+      [wid, 'AIRTIME', provider, phone, numAmount, 'PENDING']
     );
 
     res.json({ message: 'Recharge initiée', txId, status: 'PENDING', newBalance });
@@ -935,7 +1074,7 @@ app.post('/api/airtime', rateLimiter, async (req, res) => {
       log('INFO', `Airtime TX ${txId} SUCCÈS`, { ref, amount: numAmount, provider });
     } else {
       await queryRunUpdate('UPDATE transactions SET status = ? WHERE id = ?', ['FAILED', txId]);
-      await queryRunUpdate('UPDATE wallets SET balance = balance + ? WHERE id = 1', [numAmount]);
+      await queryRunUpdate('UPDATE wallets SET balance = balance + ? WHERE id = ?', [numAmount, wid]);
       log('WARN', `Airtime TX ${txId} ÉCHEC. Remboursé.`);
     }
   } catch (err) {
@@ -945,9 +1084,10 @@ app.post('/api/airtime', rateLimiter, async (req, res) => {
 });
 
 // === INTERNET — Activation forfait data ===
-app.post('/api/internet', rateLimiter, async (req, res) => {
+app.post('/api/internet', rateLimiter, authMiddleware, async (req, res) => {
   const { provider, phone, amount, bundle, pin } = req.body;
   const numAmount = parseInt(amount, 10);
+  const wid = req.agent.walletId;
 
   if (!bundle || typeof bundle !== 'object' || !bundle.id || !bundle.label)
     return res.status(400).json({ error: 'Forfait invalide.' });
@@ -955,18 +1095,18 @@ app.post('/api/internet', rateLimiter, async (req, res) => {
   if (validationError) return res.status(400).json({ error: validationError });
 
   try {
-    const wallet = await queryGet('SELECT balance, pin FROM wallets WHERE id = 1');
-    if (!(await verifyPin(1, wallet.pin, pin)))
+    const wallet = await queryGet('SELECT balance, pin FROM wallets WHERE id = ?', [wid]);
+    if (!(await verifyPin(wid, wallet.pin, pin)))
       return res.status(403).json({ error: 'Code PIN incorrect. Opération refusée.' });
     if (wallet.balance < numAmount)
       return res.status(400).json({ error: 'Solde insuffisant.' });
 
     const newBalance = wallet.balance - numAmount;
-    await queryRunUpdate('UPDATE wallets SET balance = ? WHERE id = 1', [newBalance]);
+    await queryRunUpdate('UPDATE wallets SET balance = ? WHERE id = ?', [newBalance, wid]);
 
     const txId = await queryRunInsert(
       'INSERT INTO transactions (wallet_id, type, provider, phone, amount, status) VALUES (?, ?, ?, ?, ?, ?)',
-      [1, 'INTERNET', provider, phone, numAmount, 'PENDING']
+      [wid, 'INTERNET', provider, phone, numAmount, 'PENDING']
     );
 
     res.json({ message: 'Forfait en cours d\'activation', txId, status: 'PENDING', newBalance });
@@ -979,7 +1119,7 @@ app.post('/api/internet', rateLimiter, async (req, res) => {
       log('INFO', `Internet TX ${txId} SUCCÈS`, { ref, bundle: bundle.label, amount: numAmount, provider });
     } else {
       await queryRunUpdate('UPDATE transactions SET status = ? WHERE id = ?', ['FAILED', txId]);
-      await queryRunUpdate('UPDATE wallets SET balance = balance + ? WHERE id = 1', [numAmount]);
+      await queryRunUpdate('UPDATE wallets SET balance = balance + ? WHERE id = ?', [numAmount, wid]);
       log('WARN', `Internet TX ${txId} ÉCHEC. Remboursé.`);
     }
   } catch (err) {
@@ -1040,7 +1180,7 @@ app.post('/api/webhooks/geniuspay', async (req, res) => {
 // ==========================================
 // ANALYTICS ENDPOINT
 // ==========================================
-app.get('/api/analytics', async (req, res) => {
+app.get('/api/analytics', authMiddleware, async (req, res) => {
   try {
     const sevenDaysSql = isPostgres
       ? `SELECT DATE(created_at) as day, COUNT(*) as total,
