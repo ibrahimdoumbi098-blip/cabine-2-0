@@ -471,6 +471,8 @@ async function initDb() {
       const res = await pool.query('SELECT * FROM wallets WHERE id = 1');
       if (res.rows.length === 0) {
         await pool.query('INSERT INTO wallets (id, agent_name, balance, pin) VALUES (1, $1, $2, $3)', ['Ibrahim Doumbia', 2450000, '1234']);
+        // Reset sequence so next SERIAL insert doesn't collide with id=1
+        await pool.query("SELECT setval(pg_get_serial_sequence('wallets','id'), COALESCE((SELECT MAX(id) FROM wallets), 1))");
       } else if (res.rows[0].agent_name === 'Kouassi B.') {
         await pool.query('UPDATE wallets SET agent_name = $1 WHERE id = 1', ['Ibrahim Doumbia']);
       }
@@ -743,6 +745,69 @@ async function pollPayoutStatus(reference, txId, maxAttempts = 10) {
 })();
 
 // ==========================================
+// EMAIL SERVICE (Resend) — optionnel, activer via RESEND_API_KEY
+// ==========================================
+const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
+const FROM_EMAIL = process.env.FROM_EMAIL || 'Cabine 2.0 <noreply@cabine.ci>';
+
+async function sendEmail(to, subject, html) {
+  if (!RESEND_API_KEY) return; // désactivé si clé non configurée
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: FROM_EMAIL, to: [to], subject, html }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      log('WARN', 'Email non envoyé', { to, error: err?.message });
+    } else {
+      log('INFO', 'Email envoyé', { to, subject });
+    }
+  } catch (e) {
+    log('WARN', 'Erreur email', { to, error: e.message });
+  }
+}
+
+function agentWelcomeHtml(name, email, password) {
+  return `<!DOCTYPE html>
+<html lang="fr">
+<body style="margin:0;padding:0;background:#f4f4f5;font-family:sans-serif;">
+  <div style="max-width:520px;margin:40px auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08)">
+    <div style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:32px 36px;text-align:center">
+      <div style="font-size:28px;font-weight:900;color:#fff;letter-spacing:-1px">⚡ Cabine 2.0</div>
+      <p style="color:rgba(255,255,255,0.85);margin:8px 0 0;font-size:15px">Votre accès agent est prêt</p>
+    </div>
+    <div style="padding:32px 36px">
+      <p style="font-size:17px;font-weight:700;color:#111827;margin:0 0 8px">Bonjour ${name} 👋</p>
+      <p style="color:#6b7280;font-size:14px;margin:0 0 24px">
+        Votre compte agent sur la plateforme Cabine 2.0 a été créé. Vous pouvez maintenant vous connecter et démarrer vos transactions.
+      </p>
+      <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:20px 24px;margin-bottom:24px">
+        <div style="font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px">Vos identifiants</div>
+        <div style="margin-bottom:10px">
+          <span style="font-size:12px;color:#9ca3af">Email</span><br>
+          <strong style="font-size:15px;color:#111827">${email}</strong>
+        </div>
+        <div>
+          <span style="font-size:12px;color:#9ca3af">Mot de passe provisoire</span><br>
+          <strong style="font-size:18px;color:#6366f1;font-family:monospace;letter-spacing:2px">${password}</strong>
+        </div>
+      </div>
+      <a href="https://cabine.ci" style="display:block;text-align:center;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;text-decoration:none;padding:14px 24px;border-radius:12px;font-weight:700;font-size:15px">
+        Se connecter sur Cabine 2.0
+      </a>
+      <p style="font-size:12px;color:#9ca3af;text-align:center;margin:20px 0 0">
+        Changez votre mot de passe dès la première connexion.<br>
+        Code PIN par défaut : <strong>1234</strong> — à modifier impérativement.
+      </p>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
+// ==========================================
 // INPUT VALIDATION HELPERS
 // ==========================================
 const MIN_AMOUNT = 100;       // 100 FCFA minimum
@@ -784,7 +849,7 @@ app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'Email et mot de passe requis.' });
   try {
-    const agent = await queryGet('SELECT * FROM agents WHERE email = ? AND active = 1', [email.toLowerCase().trim()]);
+    const agent = await queryGet('SELECT * FROM agents WHERE email = ? AND active = TRUE', [email.toLowerCase().trim()]);
     if (!agent) return res.status(401).json({ error: 'Email ou mot de passe incorrect.' });
     const valid = await bcrypt.compare(password, agent.password_hash);
     if (!valid) return res.status(401).json({ error: 'Email ou mot de passe incorrect.' });
@@ -824,6 +889,8 @@ app.post('/api/auth/register', authMiddleware, async (req, res) => {
       [name, email.toLowerCase().trim(), hash, 'agent', walletId]
     );
     log('INFO', 'Nouvel agent créé', { name, email, walletId, by: req.agent.email });
+    // Email de bienvenue (non-bloquant)
+    sendEmail(email, 'Bienvenue sur Cabine 2.0 — Vos accès', agentWelcomeHtml(name, email, password)).catch(() => {});
     res.json({ id: agentId, name, email, walletId, message: 'Agent créé avec succès. PIN par défaut: 1234' });
   } catch (err) {
     if (err.message?.includes('UNIQUE') || err.code === '23505') {
@@ -850,9 +917,9 @@ app.put('/api/agents/:id/toggle', authMiddleware, async (req, res) => {
   try {
     const agent = await queryGet('SELECT id, active FROM agents WHERE id = ?', [req.params.id]);
     if (!agent) return res.status(404).json({ error: 'Agent introuvable.' });
-    const newActive = agent.active ? 0 : 1;
+    const newActive = !agent.active;
     await queryRunUpdate('UPDATE agents SET active = ? WHERE id = ?', [newActive, req.params.id]);
-    res.json({ active: !!newActive });
+    res.json({ active: newActive });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -927,7 +994,7 @@ app.post('/api/invoices/generate', authMiddleware, async (req, res) => {
   const { period, amount = 10000 } = req.body;
   const p = period || new Date().toISOString().slice(0, 7);
   try {
-    const agents = await queryAll("SELECT id, wallet_id FROM agents WHERE role = 'agent' AND active = 1");
+    const agents = await queryAll("SELECT id, wallet_id FROM agents WHERE role = 'agent' AND active = TRUE");
     let created = 0;
     for (const ag of agents) {
       const existing = await queryGet('SELECT id FROM invoices WHERE agent_id = ? AND period = ?', [ag.id, p]);
