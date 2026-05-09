@@ -308,11 +308,31 @@ function HourlyHeatmap({ hourly }) {
 
 // === LOGIN SCREEN ===
 function LoginScreen({ onLogin }) {
-  const [email, setEmail]       = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError]       = useState('');
-  const [loading, setLoading]   = useState(false);
-  const [showPwd, setShowPwd]   = useState(false);
+  const [email, setEmail]         = useState('');
+  const [password, setPassword]   = useState('');
+  const [error, setError]         = useState('');
+  const [loading, setLoading]     = useState(false);
+  const [showPwd, setShowPwd]     = useState(false);
+  const [mode, setMode]           = useState('login'); // 'login' | 'forgot' | 'reset'
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotMsg, setForgotMsg] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
+
+  // Handle reset token from URL (?reset_token=...&email=...)
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlToken  = urlParams.get('reset_token');
+  const urlEmail  = urlParams.get('email');
+
+  const [resetToken, setResetToken]       = useState(urlToken || '');
+  const [resetEmail, setResetEmail]       = useState(urlEmail || '');
+  const [resetNewPwd, setResetNewPwd]     = useState('');
+  const [resetConfirm, setResetConfirm]   = useState('');
+  const [resetMsg, setResetMsg]           = useState('');
+  const [resetLoading, setResetLoading]   = useState(false);
+
+  React.useEffect(() => {
+    if (urlToken && urlEmail) setMode('reset');
+  }, []);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -332,83 +352,149 @@ function LoginScreen({ onLogin }) {
     } finally { setLoading(false); }
   };
 
-  return (
-    <div style={{
-      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'var(--bg-main)', padding: '20px',
-    }}>
-      <div style={{
-        width: '100%', maxWidth: '420px', background: 'var(--bg-card)',
-        borderRadius: '20px', padding: '40px 36px',
-        boxShadow: 'var(--shadow-xl)', animation: 'scaleIn 0.3s ease forwards',
-      }}>
-        {/* Brand */}
-        <div style={{textAlign: 'center', marginBottom: '32px'}}>
-          <div style={{
-            width: 60, height: 60, borderRadius: '16px',
-            background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            margin: '0 auto 16px', boxShadow: '0 8px 24px rgba(99,102,241,0.35)',
-          }}>
-            <Zap size={28} fill="white" color="white" />
-          </div>
-          <h1 style={{fontSize: '24px', fontWeight: 800, color: 'var(--text-dark)', marginBottom: '4px'}}>
-            Cabine 2.0
-          </h1>
-          <p style={{color: 'var(--text-secondary)', fontSize: '14px'}}>
-            Plateforme Fintech — Côte d'Ivoire
-          </p>
-        </div>
+  const handleForgot = async (e) => {
+    e.preventDefault();
+    setForgotLoading(true); setForgotMsg('');
+    try {
+      const res = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: forgotEmail.trim() }),
+      });
+      const data = await res.json();
+      setForgotMsg(data.message || 'Email envoyé si le compte existe.');
+    } catch {
+      setForgotMsg('Erreur réseau. Réessayez.');
+    } finally { setForgotLoading(false); }
+  };
 
-        {/* Form */}
+  const handleReset = async (e) => {
+    e.preventDefault();
+    if (resetNewPwd !== resetConfirm) { setResetMsg('❌ Les mots de passe ne correspondent pas.'); return; }
+    if (resetNewPwd.length < 6) { setResetMsg('❌ Minimum 6 caractères.'); return; }
+    setResetLoading(true); setResetMsg('');
+    try {
+      const res = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: resetEmail, token: resetToken, newPassword: resetNewPwd }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setResetMsg(`❌ ${data.error}`); return; }
+      setResetMsg('✅ ' + data.message);
+      setTimeout(() => {
+        window.history.replaceState({}, '', '/');
+        setMode('login');
+      }, 2000);
+    } catch {
+      setResetMsg('❌ Erreur réseau.');
+    } finally { setResetLoading(false); }
+  };
+
+  const card = {
+    width: '100%', maxWidth: '420px', background: 'var(--bg-card)',
+    borderRadius: '20px', padding: '40px 36px',
+    boxShadow: 'var(--shadow-xl)', animation: 'scaleIn 0.3s ease forwards',
+  };
+  const Brand = () => (
+    <div style={{textAlign: 'center', marginBottom: '32px'}}>
+      <div style={{width: 60, height: 60, borderRadius: '16px', background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', boxShadow: '0 8px 24px rgba(99,102,241,0.35)'}}>
+        <Zap size={28} fill="white" color="white" />
+      </div>
+      <h1 style={{fontSize: '24px', fontWeight: 800, color: 'var(--text-dark)', marginBottom: '4px'}}>Cabine 2.0</h1>
+      <p style={{color: 'var(--text-secondary)', fontSize: '14px'}}>Plateforme Fintech — Côte d'Ivoire</p>
+    </div>
+  );
+
+  if (mode === 'forgot') return (
+    <div style={{minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-main)', padding: '20px'}}>
+      <div style={card}>
+        <Brand />
+        <h2 style={{fontSize: '18px', fontWeight: 700, marginBottom: '8px', color: 'var(--text-dark)'}}>Mot de passe oublié</h2>
+        <p style={{fontSize: '13px', color: 'var(--text-muted)', marginBottom: '20px'}}>Entrez votre email — vous recevrez un lien de réinitialisation valable 1 heure.</p>
+        {!forgotMsg ? (
+          <form onSubmit={handleForgot}>
+            <div className="form-group" style={{marginBottom: '16px'}}>
+              <label style={{fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px', display: 'block'}}>Adresse email</label>
+              <input type="email" required autoFocus placeholder="exemple@email.com" value={forgotEmail} onChange={e => setForgotEmail(e.target.value)} />
+            </div>
+            <button type="submit" className="submit-btn" disabled={forgotLoading} style={{width: '100%'}}>
+              {forgotLoading ? <><RefreshCw size={16} style={{animation: 'spin 1s linear infinite'}}/> Envoi...</> : 'Envoyer le lien'}
+            </button>
+          </form>
+        ) : (
+          <div style={{background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: '10px', padding: '14px', fontSize: '13px', color: 'var(--accent-green)', marginBottom: '16px'}}>
+            <CheckCircle2 size={15} style={{marginRight: '6px', verticalAlign: 'middle'}}/>{forgotMsg}
+          </div>
+        )}
+        <button onClick={() => setMode('login')} style={{width: '100%', marginTop: '12px', background: 'none', border: 'none', color: 'var(--accent-primary)', cursor: 'pointer', fontSize: '13px', fontWeight: 600}}>
+          ← Retour à la connexion
+        </button>
+      </div>
+    </div>
+  );
+
+  if (mode === 'reset') return (
+    <div style={{minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-main)', padding: '20px'}}>
+      <div style={card}>
+        <Brand />
+        <h2 style={{fontSize: '18px', fontWeight: 700, marginBottom: '8px', color: 'var(--text-dark)'}}>Nouveau mot de passe</h2>
+        <form onSubmit={handleReset}>
+          <div className="form-group" style={{marginBottom: '12px'}}>
+            <label style={{fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px', display: 'block'}}>Nouveau mot de passe</label>
+            <input type="password" required minLength={6} autoFocus placeholder="Minimum 6 caractères" value={resetNewPwd} onChange={e => setResetNewPwd(e.target.value)} />
+          </div>
+          <div className="form-group" style={{marginBottom: '20px'}}>
+            <label style={{fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px', display: 'block'}}>Confirmer le mot de passe</label>
+            <input type="password" required placeholder="Répétez le mot de passe" value={resetConfirm} onChange={e => setResetConfirm(e.target.value)} />
+          </div>
+          {resetMsg && (
+            <div style={{background: resetMsg.startsWith('✅') ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)', border: `1px solid ${resetMsg.startsWith('✅') ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)'}`, borderRadius: '10px', padding: '12px', marginBottom: '16px', fontSize: '13px', color: resetMsg.startsWith('✅') ? 'var(--accent-green)' : 'var(--accent-red)'}}>
+              {resetMsg}
+            </div>
+          )}
+          <button type="submit" className="submit-btn" disabled={resetLoading} style={{width: '100%'}}>
+            {resetLoading ? <><RefreshCw size={16} style={{animation: 'spin 1s linear infinite'}}/> Mise à jour...</> : 'Changer le mot de passe'}
+          </button>
+        </form>
+        <button onClick={() => { setMode('login'); window.history.replaceState({}, '', '/'); }} style={{width: '100%', marginTop: '12px', background: 'none', border: 'none', color: 'var(--accent-primary)', cursor: 'pointer', fontSize: '13px', fontWeight: 600}}>
+          ← Retour à la connexion
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-main)', padding: '20px'}}>
+      <div style={card}>
+        <Brand />
         <form onSubmit={handleLogin}>
           <div className="form-group" style={{marginBottom: '16px'}}>
-            <label style={{fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px', display: 'block'}}>
-              Adresse email
-            </label>
-            <input
-              type="email" required autoFocus
-              placeholder="exemple@email.com"
-              value={email} onChange={e => setEmail(e.target.value)}
-            />
+            <label style={{fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px', display: 'block'}}>Adresse email</label>
+            <input type="email" required autoFocus placeholder="exemple@email.com" value={email} onChange={e => setEmail(e.target.value)} />
           </div>
-          <div className="form-group" style={{marginBottom: '24px', position: 'relative'}}>
-            <label style={{fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px', display: 'block'}}>
-              Mot de passe
-            </label>
-            <input
-              type={showPwd ? 'text' : 'password'} required
-              placeholder="••••••••"
-              value={password} onChange={e => setPassword(e.target.value)}
-              style={{paddingRight: '44px'}}
-            />
-            <button type="button" onClick={() => setShowPwd(p => !p)}
-              style={{position: 'absolute', right: '12px', bottom: '12px', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer'}}>
+          <div className="form-group" style={{marginBottom: '8px', position: 'relative'}}>
+            <label style={{fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px', display: 'block'}}>Mot de passe</label>
+            <input type={showPwd ? 'text' : 'password'} required placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} style={{paddingRight: '44px'}} />
+            <button type="button" onClick={() => setShowPwd(p => !p)} style={{position: 'absolute', right: '12px', bottom: '12px', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer'}}>
               {showPwd ? <EyeOff size={18}/> : <Eye size={18}/>}
             </button>
           </div>
-
+          <div style={{textAlign: 'right', marginBottom: '20px'}}>
+            <button type="button" onClick={() => setMode('forgot')} style={{background: 'none', border: 'none', color: 'var(--accent-primary)', cursor: 'pointer', fontSize: '12px', fontWeight: 600}}>
+              Mot de passe oublié ?
+            </button>
+          </div>
           {error && (
-            <div style={{
-              background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
-              borderRadius: '10px', padding: '12px 14px', marginBottom: '16px',
-              color: 'var(--accent-red)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px',
-            }}>
+            <div style={{background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '10px', padding: '12px 14px', marginBottom: '16px', color: 'var(--accent-red)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px'}}>
               <AlertTriangle size={15}/> {error}
             </div>
           )}
-
           <button type="submit" className="submit-btn" disabled={loading} style={{width: '100%'}}>
-            {loading
-              ? <><RefreshCw size={16} style={{animation: 'spin 1s linear infinite'}}/> Connexion...</>
-              : <><Zap size={16}/> Se connecter</>
-            }
+            {loading ? <><RefreshCw size={16} style={{animation: 'spin 1s linear infinite'}}/> Connexion...</> : <><Zap size={16}/> Se connecter</>}
           </button>
         </form>
-
-        <p style={{textAlign: 'center', marginTop: '24px', fontSize: '12px', color: 'var(--text-muted)'}}>
-          Cabine 2.0 — Accès réservé aux agents autorisés
-        </p>
+        <p style={{textAlign: 'center', marginTop: '24px', fontSize: '12px', color: 'var(--text-muted)'}}>Cabine 2.0 — Accès réservé aux agents autorisés</p>
       </div>
     </div>
   );
@@ -422,7 +508,10 @@ function App() {
   const getToken = () => localStorage.getItem('cabine_token');
   const authHeaders = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` });
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', headers: authHeaders() });
+    } catch { /* silently ignore */ }
     localStorage.removeItem('cabine_token');
     setAuthAgent(null);
   };
@@ -494,6 +583,18 @@ function App() {
   const [rechargeNote, setRechargeNote]       = useState('');
   const [rechargeMsg, setRechargeMsg]         = useState('');
   const [genInvoiceMsg, setGenInvoiceMsg]     = useState('');
+
+  // Change password (for all users)
+  const [changePwdCurrent, setChangePwdCurrent]   = useState('');
+  const [changePwdNew, setChangePwdNew]           = useState('');
+  const [changePwdConfirm, setChangePwdConfirm]   = useState('');
+  const [changePwdMsg, setChangePwdMsg]           = useState('');
+  const [changePwdLoading, setChangePwdLoading]   = useState(false);
+
+  // Alert threshold
+  const [alertThreshold, setAlertThreshold]       = useState(50000);
+  const [alertThresholdInput, setAlertThresholdInput] = useState('50000');
+  const [alertThresholdMsg, setAlertThresholdMsg] = useState('');
 
   // Commission config
   const [commissions, setCommissions] = useState({ transfer: 2, withdraw: 2, airtime: 2, internet: 2 });
@@ -599,6 +700,38 @@ function App() {
         setLocalRates(prev => ({ ...prev, ...map }));
       }
     } catch { /* keep defaults */ }
+  };
+
+  const handleChangePassword = async (e) => {
+    e.preventDefault();
+    if (changePwdNew !== changePwdConfirm) { setChangePwdMsg('❌ Les mots de passe ne correspondent pas.'); return; }
+    if (changePwdNew.length < 6) { setChangePwdMsg('❌ Minimum 6 caractères.'); return; }
+    setChangePwdLoading(true); setChangePwdMsg('');
+    try {
+      const res = await apiFetch('/auth/change-password', {
+        method: 'PUT',
+        body: JSON.stringify({ currentPassword: changePwdCurrent, newPassword: changePwdNew }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setChangePwdMsg(`❌ ${data.error}`); return; }
+      setChangePwdMsg('✅ ' + data.message);
+      setChangePwdCurrent(''); setChangePwdNew(''); setChangePwdConfirm('');
+      setTimeout(() => setChangePwdMsg(''), 4000);
+    } catch (err) { setChangePwdMsg(`❌ ${err.message}`); }
+    finally { setChangePwdLoading(false); }
+  };
+
+  const saveAlertThreshold = async () => {
+    const val = parseInt(alertThresholdInput, 10);
+    if (isNaN(val) || val < 0) { setAlertThresholdMsg('❌ Valeur invalide.'); return; }
+    try {
+      const res = await apiFetch('/wallet/alert-threshold', { method: 'PUT', body: JSON.stringify({ threshold: val }) });
+      const data = await res.json();
+      if (!res.ok) { setAlertThresholdMsg(`❌ ${data.error}`); return; }
+      setAlertThreshold(val);
+      setAlertThresholdMsg('✅ Seuil mis à jour.');
+      setTimeout(() => setAlertThresholdMsg(''), 3000);
+    } catch (err) { setAlertThresholdMsg(`❌ ${err.message}`); }
   };
 
   const saveCommission = async (type, rate) => {
@@ -1670,55 +1803,86 @@ function App() {
         </div>
 
         <div className="card settings-panel">
-           <div className="card-header">
-            Profil de l'agent
-          </div>
+          <div className="card-header">Profil de l'agent</div>
           <div className="card-body">
-             <div className="profile-info-row">
-               <span>Nom :</span> <strong>{agentName}</strong>
-             </div>
-             <div className="profile-info-row" style={{marginTop: '10px'}}>
-               <span>Email :</span> <strong>ibrahim.doumbi098@gmail.com</strong>
-             </div>
-             <div className="profile-info-row" style={{marginTop: '10px'}}>
-               <span>Identifiant Agence :</span> <strong>ABJ-001</strong>
-             </div>
-             <div className="profile-info-row" style={{marginTop: '10px'}}>
-               <span>Localisation :</span> <strong>Abidjan, Côte d'Ivoire</strong>
-             </div>
+            <div className="profile-info-row"><span>Nom :</span> <strong>{agentName}</strong></div>
+            <div className="profile-info-row" style={{marginTop: '10px'}}><span>Email :</span> <strong>{authAgent?.email || '—'}</strong></div>
+            <div className="profile-info-row" style={{marginTop: '10px'}}><span>Rôle :</span>
+              <strong style={{color: authAgent?.role === 'admin' ? 'var(--accent-primary)' : 'var(--accent-green)'}}>
+                {authAgent?.role === 'admin' ? '👑 Administrateur' : '👤 Agent'}
+              </strong>
+            </div>
+            <div className="profile-info-row" style={{marginTop: '10px'}}><span>Localisation :</span> <strong>Abidjan, Côte d'Ivoire</strong></div>
           </div>
         </div>
 
+        {/* Changer le mot de passe */}
+        <div className="card settings-panel">
+          <div className="card-header"><Lock size={16} style={{marginRight:'8px',verticalAlign:'middle'}}/>Changer le mot de passe</div>
+          <div className="card-body">
+            <form onSubmit={handleChangePassword}>
+              <div style={{display:'grid', gridTemplateColumns:'1fr', gap:'12px', marginBottom:'12px'}}>
+                <div className="form-group" style={{margin:0}}>
+                  <label>Mot de passe actuel</label>
+                  <input type="password" placeholder="••••••••" required value={changePwdCurrent} onChange={e => setChangePwdCurrent(e.target.value)} />
+                </div>
+                <div className="form-group" style={{margin:0}}>
+                  <label>Nouveau mot de passe</label>
+                  <input type="password" placeholder="Min. 6 caractères" required minLength={6} value={changePwdNew} onChange={e => setChangePwdNew(e.target.value)} />
+                </div>
+                <div className="form-group" style={{margin:0}}>
+                  <label>Confirmer le nouveau mot de passe</label>
+                  <input type="password" placeholder="Répétez le nouveau mot de passe" required value={changePwdConfirm} onChange={e => setChangePwdConfirm(e.target.value)} />
+                </div>
+              </div>
+              <button type="submit" className="btn-primary" disabled={changePwdLoading}>
+                {changePwdLoading ? <><RefreshCw size={14} style={{animation:'spin 1s linear infinite'}}/> Mise à jour...</> : 'Changer le mot de passe'}
+              </button>
+              {changePwdMsg && <p style={{marginTop:'10px', fontSize:'13px', color: changePwdMsg.startsWith('✅') ? 'var(--accent-green)' : 'var(--accent-red)'}}>{changePwdMsg}</p>}
+            </form>
+          </div>
+        </div>
+
+        {/* Seuil d'alerte solde bas */}
+        <div className="card settings-panel">
+          <div className="card-header"><AlertTriangle size={16} style={{marginRight:'8px',verticalAlign:'middle'}}/>Alerte solde bas</div>
+          <div className="card-body">
+            <p style={{fontSize:'13px', color:'var(--text-muted)', marginBottom:'12px'}}>
+              Recevez un email automatique quand votre solde flotte descend sous ce seuil.
+            </p>
+            <div style={{display:'flex', gap:'12px', alignItems:'flex-end', flexWrap:'wrap'}}>
+              <div className="form-group" style={{margin:0, flex:1, minWidth:'180px'}}>
+                <label>Seuil d'alerte (FCFA)</label>
+                <input type="number" min="0" step="5000" value={alertThresholdInput} onChange={e => setAlertThresholdInput(e.target.value)} />
+              </div>
+              <button className="btn-primary" onClick={saveAlertThreshold} style={{minWidth:'120px'}}>Enregistrer</button>
+            </div>
+            {alertThresholdMsg && <p style={{marginTop:'10px', fontSize:'13px', color: alertThresholdMsg.startsWith('✅') ? 'var(--accent-green)' : 'var(--accent-red)'}}>{alertThresholdMsg}</p>}
+            <p style={{fontSize:'12px', color:'var(--text-muted)', marginTop:'8px'}}>
+              Seuil actuel : <strong>{new Intl.NumberFormat('fr-FR').format(alertThreshold)} FCFA</strong>
+              {' '}— Nécessite <code>RESEND_API_KEY</code> configuré sur Render.
+            </p>
+          </div>
+        </div>
+
+        {/* Statut GeniusPay — visible par tous */}
         <div className="card settings-panel" style={{gridColumn: '1 / -1'}}>
           <div className="card-header">
             <Radio size={18} style={{marginRight: '8px', verticalAlign: 'middle'}}/>
             Statut GeniusPay
           </div>
           <div className="card-body" style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '16px'}}>
-            <div className="profile-info-row" style={{flexDirection: 'column', alignItems: 'center', textAlign: 'center', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '16px'}}>
-              <span>Connexion</span>
-              <strong style={{color: gpStatus.connected ? 'var(--accent-green)' : 'var(--accent-red)', fontSize: '18px', marginTop: '8px'}}>
-                {gpStatus.connected ? '✅' : '❌'}
-              </strong>
-            </div>
-            <div className="profile-info-row" style={{flexDirection: 'column', alignItems: 'center', textAlign: 'center', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '16px'}}>
-              <span>Mode</span>
-              <strong style={{fontSize: '14px', marginTop: '8px'}}>
-                {gpStatus.mode === 'sandbox' ? '🧪 Sandbox' : '🔴 Live'}
-              </strong>
-            </div>
-            <div className="profile-info-row" style={{flexDirection: 'column', alignItems: 'center', textAlign: 'center', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '16px'}}>
-              <span>Clés API</span>
-              <strong style={{color: gpStatus.hasKeys ? 'var(--accent-green)' : 'var(--accent-red)', fontSize: '18px', marginTop: '8px'}}>
-                {gpStatus.hasKeys ? '✅' : '❌'}
-              </strong>
-            </div>
-            <div className="profile-info-row" style={{flexDirection: 'column', alignItems: 'center', textAlign: 'center', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '16px'}}>
-              <span>Wallet</span>
-              <strong style={{fontSize: '12px', marginTop: '8px'}}>
-                {gpStatus.walletId || 'Auto'}
-              </strong>
-            </div>
+            {[
+              { label: 'Connexion', value: gpStatus.connected ? '✅' : '❌', color: gpStatus.connected ? 'var(--accent-green)' : 'var(--accent-red)', size: '18px' },
+              { label: 'Mode', value: gpStatus.mode === 'sandbox' ? '🧪 Sandbox' : '🔴 Live', size: '14px' },
+              { label: 'Clés API', value: gpStatus.hasKeys ? '✅' : '❌', color: gpStatus.hasKeys ? 'var(--accent-green)' : 'var(--accent-red)', size: '18px' },
+              { label: 'Wallet', value: gpStatus.walletId || 'Auto', size: '12px' },
+            ].map((item, i) => (
+              <div key={i} style={{flexDirection: 'column', alignItems: 'center', textAlign: 'center', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '16px', display:'flex'}}>
+                <span style={{fontSize:'12px', color:'var(--text-muted)'}}>{item.label}</span>
+                <strong style={{color: item.color || 'var(--text-dark)', fontSize: item.size, marginTop: '8px'}}>{item.value}</strong>
+              </div>
+            ))}
           </div>
         </div>
 

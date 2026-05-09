@@ -101,37 +101,28 @@ app.use((req, res, next) => {
 });
 
 // ==========================================
-// BASIC RATE LIMITING (transfer endpoint)
+// RATE LIMITING
 // ==========================================
-const rateLimitMap = new Map();
-const RATE_LIMIT_WINDOW = 60000; // 1 minute
-const RATE_LIMIT_MAX = 30; // max requests per window
-
-function rateLimiter(req, res, next) {
-  const ip = req.ip || req.socket.remoteAddress;
-  const now = Date.now();
-  if (!rateLimitMap.has(ip)) {
-    rateLimitMap.set(ip, { count: 1, start: now });
-    return next();
-  }
-  const entry = rateLimitMap.get(ip);
-  if (now - entry.start > RATE_LIMIT_WINDOW) {
-    rateLimitMap.set(ip, { count: 1, start: now });
-    return next();
-  }
-  entry.count++;
-  if (entry.count > RATE_LIMIT_MAX) {
-    return res.status(429).json({ error: 'Trop de requêtes. Réessayez dans une minute.' });
-  }
-  next();
+function makeRateLimiter(windowMs, max, message) {
+  const map = new Map();
+  setInterval(() => {
+    const now = Date.now();
+    for (const [ip, e] of map) if (now - e.start > windowMs * 2) map.delete(ip);
+  }, windowMs * 2);
+  return function rateLimiter(req, res, next) {
+    const ip = req.ip || req.socket.remoteAddress;
+    const now = Date.now();
+    const entry = map.get(ip);
+    if (!entry || now - entry.start > windowMs) {
+      map.set(ip, { count: 1, start: now }); return next();
+    }
+    entry.count++;
+    if (entry.count > max) return res.status(429).json({ error: message });
+    next();
+  };
 }
-// Cleanup old entries periodically
-setInterval(() => {
-  const now = Date.now();
-  for (const [ip, entry] of rateLimitMap) {
-    if (now - entry.start > RATE_LIMIT_WINDOW * 2) rateLimitMap.delete(ip);
-  }
-}, 120000);
+const rateLimiter     = makeRateLimiter(60000,  30, 'Trop de requêtes. Réessayez dans une minute.');
+const authRateLimiter = makeRateLimiter(900000,  8, 'Trop de tentatives. Réessayez dans 15 minutes.');
 
 // ==========================================
 // FORFAITS OPÉRATEURS CI — source unique côté serveur
@@ -265,6 +256,21 @@ const GENIUSPAY_WALLET_ID = process.env.GENIUSPAY_WALLET_ID || '';
 const GENIUSPAY_WEBHOOK_SECRET = process.env.GENIUSPAY_WEBHOOK_SECRET || '';
 const GENIUSPAY_MODE = process.env.GENIUSPAY_MODE || 'sandbox';
 const JWT_SECRET = process.env.JWT_SECRET || 'cabine2-secret-change-in-prod-2026';
+
+// Token blacklist (révocation immédiate à la déconnexion)
+const tokenBlacklist = new Set();
+setInterval(() => {
+  for (const t of tokenBlacklist) {
+    try { jwt.verify(t, JWT_SECRET); } catch { tokenBlacklist.delete(t); }
+  }
+}, 3600000);
+
+// Reset tokens (mot de passe oublié)
+const resetTokens = new Map(); // email → { token, expires }
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of resetTokens) if (now > v.expires) resetTokens.delete(k);
+}, 3600000);
 
 let discoveredWalletId = GENIUSPAY_WALLET_ID;
 let geniusPayConnected = false;
@@ -462,6 +468,9 @@ async function initDb() {
       await pool.query(invoicesPg);
       await pool.query(ledgerPg);
       await pool.query(commissionPg);
+      // Migrate wallet columns if not exists
+      await pool.query('ALTER TABLE wallets ADD COLUMN IF NOT EXISTS daily_limit INTEGER DEFAULT 2000000');
+      await pool.query('ALTER TABLE wallets ADD COLUMN IF NOT EXISTS alert_threshold INTEGER DEFAULT 50000');
       for (const c of COMMISSION_DEFAULTS) {
         await pool.query(
           'INSERT INTO commission_config (type, label, rate_percent) VALUES ($1, $2, $3) ON CONFLICT (type) DO NOTHING',
@@ -519,13 +528,21 @@ async function initDb() {
           });
         });
       });
-      // Migrate: add missing columns to old DB
+      // Migrate: add missing columns
       const cols = ['geniuspay_payout_id', 'idempotency_key', 'fees', 'geniuspay_provider'];
       for (const col of cols) {
         await new Promise((resolve) => {
           const type = col === 'fees' ? 'INTEGER DEFAULT 0' : 'TEXT';
           sqliteDb.run(`ALTER TABLE transactions ADD COLUMN ${col} ${type}`, () => resolve());
         });
+      }
+      const walletCols = [
+        'daily_limit INTEGER DEFAULT 2000000',
+        'alert_threshold INTEGER DEFAULT 50000',
+      ];
+      for (const col of walletCols) {
+        const colName = col.split(' ')[0];
+        await new Promise(resolve => sqliteDb.run(`ALTER TABLE wallets ADD COLUMN ${col}`, () => resolve()));
       }
     }
     console.log('✅ Base de données initialisée.');
@@ -647,15 +664,16 @@ async function executeGeniusPayPayout(phone, amount, provider, txId) {
   const idempotencyKey = `CABINE-TX-${txId}-${Date.now()}`;
 
   if (!geniusPayConnected) {
-    console.log(`[FALLBACK SIMULATEUR] Payout ${amount} XOF → ${formattedPhone} (${provider})`);
+    if (GENIUSPAY_MODE === 'live') {
+      // En mode Live, on ne simule jamais — l'erreur doit être visible
+      console.error('[LIVE MODE] GeniusPay non connecté — paiement impossible.');
+      return { success: false, error: 'GeniusPay indisponible. Vérifiez votre connexion API.', idempotencyKey };
+    }
+    console.log(`[SIMULATEUR SANDBOX] Payout ${amount} XOF → ${formattedPhone} (${provider})`);
     return new Promise((resolve) => {
       setTimeout(() => {
-        const ok = Math.random() > 0.05;
-        resolve(ok
-          ? { success: true, ref: 'SIM-' + Date.now(), payoutId: 'SIM-PYT-' + txId, fees: 0, idempotencyKey }
-          : { success: false, error: 'Réseau opérateur indisponible (simulateur).', idempotencyKey }
-        );
-      }, 2000);
+        resolve({ success: true, ref: 'SIM-' + Date.now(), payoutId: 'SIM-PYT-' + txId, fees: 0, idempotencyKey });
+      }, 1500);
     });
   }
 
@@ -807,6 +825,52 @@ function agentWelcomeHtml(name, email, password) {
 </html>`;
 }
 
+function resetPasswordHtml(name, resetUrl) {
+  return `<!DOCTYPE html><html lang="fr"><body style="margin:0;padding:0;background:#f4f4f5;font-family:sans-serif;">
+  <div style="max-width:520px;margin:40px auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08)">
+    <div style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:32px 36px;text-align:center">
+      <div style="font-size:28px;font-weight:900;color:#fff;letter-spacing:-1px">⚡ Cabine 2.0</div>
+      <p style="color:rgba(255,255,255,0.85);margin:8px 0 0;font-size:15px">Réinitialisation du mot de passe</p>
+    </div>
+    <div style="padding:32px 36px">
+      <p style="font-size:17px;font-weight:700;color:#111827;margin:0 0 8px">Bonjour ${name},</p>
+      <p style="color:#6b7280;font-size:14px;margin:0 0 24px">
+        Vous avez demandé la réinitialisation de votre mot de passe. Ce lien expire dans <strong>1 heure</strong>.
+      </p>
+      <a href="${resetUrl}" style="display:block;text-align:center;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;text-decoration:none;padding:14px 24px;border-radius:12px;font-weight:700;font-size:15px">
+        Réinitialiser mon mot de passe
+      </a>
+      <p style="font-size:12px;color:#9ca3af;text-align:center;margin:20px 0 0">
+        Si vous n'avez pas fait cette demande, ignorez cet email. Votre mot de passe reste inchangé.
+      </p>
+    </div>
+  </div></body></html>`;
+}
+
+async function sendLowBalanceAlert(agentEmail, agentName, balance, threshold) {
+  const html = `<!DOCTYPE html><html lang="fr"><body style="margin:0;padding:0;background:#f4f4f5;font-family:sans-serif;">
+  <div style="max-width:520px;margin:40px auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08)">
+    <div style="background:#f59e0b;padding:24px 36px;text-align:center">
+      <div style="font-size:24px;font-weight:900;color:#fff;">⚠️ Solde bas — Cabine 2.0</div>
+    </div>
+    <div style="padding:32px 36px">
+      <p style="font-size:16px;color:#111827;margin:0 0 16px">Bonjour <strong>${agentName}</strong>,</p>
+      <p style="color:#6b7280;font-size:14px;margin:0 0 16px">
+        Votre solde flotte est passé sous le seuil d'alerte configuré.
+      </p>
+      <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:12px;padding:16px 20px;text-align:center;margin-bottom:20px">
+        <div style="font-size:12px;color:#92400e;font-weight:700">SOLDE ACTUEL</div>
+        <div style="font-size:28px;font-weight:900;color:#92400e">${new Intl.NumberFormat('fr-FR').format(balance)} FCFA</div>
+        <div style="font-size:12px;color:#b45309">Seuil d'alerte : ${new Intl.NumberFormat('fr-FR').format(threshold)} FCFA</div>
+      </div>
+      <a href="https://cabine.ci" style="display:block;text-align:center;background:#f59e0b;color:#fff;text-decoration:none;padding:14px 24px;border-radius:12px;font-weight:700;font-size:15px">
+        Recharger mon compte
+      </a>
+    </div>
+  </div></body></html>`;
+  await sendEmail(agentEmail, '⚠️ Solde flotte bas — Cabine 2.0', html);
+}
+
 // ==========================================
 // INPUT VALIDATION HELPERS
 // ==========================================
@@ -836,6 +900,7 @@ function validateOperationInput(provider, phone, amount, pin) {
 function authMiddleware(req, res, next) {
   const token = req.headers.authorization?.replace('Bearer ', '').trim();
   if (!token) return res.status(401).json({ error: 'Non authentifié. Connectez-vous.' });
+  if (tokenBlacklist.has(token)) return res.status(401).json({ error: 'Session expirée. Reconnectez-vous.' });
   try {
     req.agent = jwt.verify(token, JWT_SECRET);
     next();
@@ -845,7 +910,7 @@ function authMiddleware(req, res, next) {
 }
 
 // Login
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', authRateLimiter, async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'Email et mot de passe requis.' });
   try {
@@ -920,6 +985,67 @@ app.put('/api/agents/:id/toggle', authMiddleware, async (req, res) => {
     const newActive = !agent.active;
     await queryRunUpdate('UPDATE agents SET active = ? WHERE id = ?', [newActive, req.params.id]);
     res.json({ active: newActive });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Déconnexion (révoque le token)
+app.post('/api/auth/logout', authMiddleware, (req, res) => {
+  const token = req.headers.authorization?.replace('Bearer ', '').trim();
+  if (token) tokenBlacklist.add(token);
+  res.json({ message: 'Déconnecté.' });
+});
+
+// Mot de passe oublié
+app.post('/api/auth/forgot-password', authRateLimiter, async (req, res) => {
+  const { email } = req.body || {};
+  if (!email) return res.status(400).json({ error: 'Email requis.' });
+  try {
+    const agent = await queryGet('SELECT id, name, email FROM agents WHERE email = ?', [email.toLowerCase().trim()]);
+    // Toujours répondre OK pour ne pas révéler si l'email existe
+    res.json({ message: 'Si cet email est enregistré, vous recevrez un lien de réinitialisation dans quelques minutes.' });
+    if (!agent) return;
+    const token = crypto.randomBytes(32).toString('hex');
+    resetTokens.set(email.toLowerCase(), { token, expires: Date.now() + 3600000 });
+    const resetUrl = `${APP_DOMAIN}/?reset_token=${token}&email=${encodeURIComponent(email.toLowerCase())}`;
+    await sendEmail(email, 'Réinitialisation de votre mot de passe — Cabine 2.0', resetPasswordHtml(agent.name, resetUrl));
+    log('INFO', 'Reset password demandé', { email });
+  } catch (err) { log('ERROR', 'forgot-password', { error: err.message }); }
+});
+
+// Réinitialiser le mot de passe (via token email)
+app.post('/api/auth/reset-password', async (req, res) => {
+  const { email, token, newPassword } = req.body || {};
+  if (!email || !token || !newPassword)
+    return res.status(400).json({ error: 'Données manquantes.' });
+  if (newPassword.length < 6)
+    return res.status(400).json({ error: 'Mot de passe trop court (minimum 6 caractères).' });
+  const entry = resetTokens.get(email.toLowerCase());
+  if (!entry || entry.token !== token || Date.now() > entry.expires)
+    return res.status(400).json({ error: 'Lien invalide ou expiré. Faites une nouvelle demande.' });
+  try {
+    const hash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+    await queryRunUpdate('UPDATE agents SET password_hash = ? WHERE email = ?', [hash, email.toLowerCase()]);
+    resetTokens.delete(email.toLowerCase());
+    log('INFO', 'Mot de passe réinitialisé', { email });
+    res.json({ message: 'Mot de passe réinitialisé. Vous pouvez vous connecter.' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Changer son propre mot de passe (authentifié)
+app.put('/api/auth/change-password', authMiddleware, async (req, res) => {
+  const { currentPassword, newPassword } = req.body || {};
+  if (!currentPassword || !newPassword)
+    return res.status(400).json({ error: 'Mot de passe actuel et nouveau requis.' });
+  if (newPassword.length < 6)
+    return res.status(400).json({ error: 'Nouveau mot de passe trop court (minimum 6 caractères).' });
+  try {
+    const agent = await queryGet('SELECT password_hash FROM agents WHERE id = ?', [req.agent.agentId]);
+    const valid = await bcrypt.compare(currentPassword, agent.password_hash);
+    if (!valid) return res.status(403).json({ error: 'Mot de passe actuel incorrect.' });
+    const hash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+    await queryRunUpdate('UPDATE agents SET password_hash = ? WHERE id = ?', [hash, req.agent.agentId]);
+    log('INFO', 'Mot de passe changé', { agent: req.agent.email });
+    res.json({ message: 'Mot de passe mis à jour avec succès.' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1075,6 +1201,31 @@ app.put('/api/commissions/:type', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Configurer seuil d'alerte solde bas
+app.put('/api/wallet/alert-threshold', authMiddleware, async (req, res) => {
+  const { threshold } = req.body;
+  const val = parseInt(threshold, 10);
+  if (isNaN(val) || val < 0) return res.status(400).json({ error: 'Seuil invalide.' });
+  try {
+    await queryRunUpdate('UPDATE wallets SET alert_threshold = ? WHERE id = ?', [val, req.agent.walletId]);
+    res.json({ message: 'Seuil d\'alerte mis à jour.', threshold: val });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Configurer limite journalière (admin seulement)
+app.put('/api/agents/:id/limits', authMiddleware, async (req, res) => {
+  if (req.agent.role !== 'admin') return res.status(403).json({ error: 'Admin requis.' });
+  const { daily_limit } = req.body;
+  const limit = parseInt(daily_limit, 10);
+  if (isNaN(limit) || limit < 0) return res.status(400).json({ error: 'Limite invalide.' });
+  try {
+    const agent = await queryGet('SELECT wallet_id FROM agents WHERE id = ?', [req.params.id]);
+    if (!agent) return res.status(404).json({ error: 'Agent introuvable.' });
+    await queryRunUpdate('UPDATE wallets SET daily_limit = ? WHERE id = ?', [limit, agent.wallet_id]);
+    res.json({ message: 'Limite journalière mise à jour.', daily_limit: limit });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/bundles', (req, res) => {
   res.setHeader('Cache-Control', 'public, max-age=3600'); // cache 1h
   res.json(OPERATOR_BUNDLES);
@@ -1143,7 +1294,12 @@ app.get('/api/health', async (req, res) => {
 // Wallet balance
 app.get('/api/wallet', authMiddleware, async (req, res) => {
   try {
-    const row = await queryGet('SELECT id, agent_name, balance FROM wallets WHERE id = ?', [req.agent.walletId]);
+    const row = await queryGet('SELECT id, agent_name, balance, alert_threshold FROM wallets WHERE id = ?', [req.agent.walletId]);
+    // Vérifier alerte solde bas
+    if (row && row.alert_threshold > 0 && row.balance < row.alert_threshold) {
+      const ag = await queryGet('SELECT email, name FROM agents WHERE wallet_id = ?', [req.agent.walletId]);
+      if (ag) sendLowBalanceAlert(ag.email, ag.name, row.balance, row.alert_threshold).catch(() => {});
+    }
     res.json(row);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1305,27 +1461,14 @@ app.post('/api/retrait', rateLimiter, authMiddleware, async (req, res) => {
       [wid, 'RETRAIT', provider, phone, numAmount, 'PENDING']
     );
 
-    // Répondre immédiatement
-    res.json({ message: 'Retrait initié', txId, status: 'PENDING' });
-
-    // Simulation d'encaissement (en production: GeniusPay collection API)
-    await new Promise(r => setTimeout(r, 1500 + Math.random() * 1000));
-    const ok = Math.random() > 0.02; // 98% succès simulé
-
-    if (ok) {
-      const ref = geniusPayConnected
-        ? `GP-RET-${Date.now()}`
-        : `SIM-RET-${Date.now()}`;
-      await queryRunUpdate(
-        'UPDATE transactions SET status = ?, geniuspay_ref = ? WHERE id = ?',
-        ['SUCCESS', ref, txId]
-      );
-      log('INFO', `Retrait TX ${txId} SUCCÈS`, { ref, amount: numAmount, provider });
-    } else {
-      await queryRunUpdate('UPDATE transactions SET status = ? WHERE id = ?', ['FAILED', txId]);
-      await queryRunUpdate('UPDATE wallets SET balance = balance - ? WHERE id = ?', [numAmount, wid]);
-      log('WARN', `Retrait TX ${txId} ÉCHEC. Crédit annulé.`);
-    }
+    // Le retrait = le client envoie ses fonds à l'agent → on confirme immédiatement
+    const ref = `RET-${Date.now()}`;
+    await queryRunUpdate(
+      'UPDATE transactions SET status = ?, geniuspay_ref = ? WHERE id = ?',
+      ['SUCCESS', ref, txId]
+    );
+    log('INFO', `Retrait TX ${txId} SUCCÈS`, { ref, amount: numAmount, provider });
+    res.json({ message: 'Retrait enregistré', txId, status: 'SUCCESS' });
   } catch (err) {
     log('ERROR', 'Retrait error', { error: err.message });
     res.status(500).json({ error: err.message });
