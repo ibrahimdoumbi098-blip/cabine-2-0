@@ -1282,18 +1282,22 @@ function App() {
           <h1>{getGreeting()}, {agentName.split(' ')[0]} 👋</h1>
           <p>Prêt à traiter les transactions d'aujourd'hui ?</p>
           <div className="status-badges">
+            {/* Statut connexion — visible par tous */}
             <span className={`status-pill gp-${gpMode}`}>
               <span className="status-dot"/>
-              GeniusPay {gpLabel}
+              {authAgent?.role === 'admin' ? `GeniusPay ${gpLabel}` : (gpStatus.connected ? '● En ligne' : '● Hors ligne')}
             </span>
-            {gpStatus.walletId && (
+            {/* Infos techniques — admin seulement */}
+            {authAgent?.role === 'admin' && gpStatus.walletId && (
               <span className="status-pill account">
                 <Layers size={10}/> {gpStatus.walletId}
               </span>
             )}
-            <span className="status-pill account">
-              <Zap size={10}/> CAB-{String(balance).slice(-4).padStart(4,'0')}
-            </span>
+            {authAgent?.role === 'admin' && (
+              <span className="status-pill account">
+                <Zap size={10}/> CAB-{String(balance).slice(-4).padStart(4,'0')}
+              </span>
+            )}
           </div>
         </div>
 
@@ -1605,10 +1609,10 @@ function App() {
                     <span className="currency">FCFA</span>
                   </div>
                   <div className="quick-amounts">
-                    {[200, 500, 1000, 2000, 5000].map(v => (
+                    {[500, 1000, 2000, 5000, 10000, 20000, 50000].map(v => (
                       <button key={v} type="button" className="quick-amount-btn"
                         onClick={() => { setAmount(String(v)); setSelectedBundle(null); }}>
-                        {new Intl.NumberFormat('fr-FR').format(v)}
+                        {v >= 1000 ? `${v/1000}k` : v}
                       </button>
                     ))}
                   </div>
@@ -2338,11 +2342,26 @@ function App() {
             </div>
             <div style={{ fontSize: '12px', opacity: 0.75 }}>{agentName} • Admin</div>
           </div>
-          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '16px', padding: '20px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-            <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '8px' }}>Recharger mon propre compte</div>
-            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
-              Pour créditer votre flotte après un dépôt GeniusPay ou virement reçu.
-            </div>
+          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '16px', padding: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Gestion du solde flotte</div>
+            <button
+              className="btn-primary"
+              style={{ background: '#10b981', fontSize: '13px' }}
+              onClick={async () => {
+                addToast('info', 'Synchronisation...', 'Lecture du solde GeniusPay en cours.');
+                try {
+                  const res = await apiFetch('/admin/sync-balance', { method: 'POST', body: JSON.stringify({ agentId: authAgent?.id }) });
+                  const data = await res.json();
+                  if (!res.ok) { addToast('error', 'Erreur sync', data.error); return; }
+                  addToast('success', 'Solde synchronisé', data.message);
+                  setBalance(data.balance);
+                  fetchAdminOverview();
+                } catch (e) { addToast('error', 'Erreur', e.message); }
+              }}
+            >
+              <RefreshCw size={14} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
+              Sync depuis GeniusPay
+            </button>
             <button
               className="btn-primary"
               style={{ background: '#6366f1', fontSize: '13px' }}
@@ -2352,8 +2371,28 @@ function App() {
               }}
             >
               <Banknote size={15} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
-              Recharger mon compte
+              Ajouter au solde
             </button>
+            <button
+              className="btn-secondary"
+              style={{ fontSize: '13px', color: 'var(--accent-red)' }}
+              onClick={() => {
+                const v = prompt('Définir le solde exact (FCFA) — remplace le solde actuel :');
+                if (!v) return;
+                const n = parseInt(v, 10);
+                if (isNaN(n) || n < 0) { addToast('error', 'Valeur invalide', 'Entrez un nombre entier positif.'); return; }
+                apiFetch(`/admin/set-balance/self`, { method: 'PUT', body: JSON.stringify({ balance: n, reason: 'Correction solde initial' }) })
+                  .then(r => r.json())
+                  .then(d => { addToast('success', 'Solde défini', d.message); setBalance(n); fetchAdminOverview(); })
+                  .catch(e => addToast('error', 'Erreur', e.message));
+              }}
+            >
+              Définir un solde exact
+            </button>
+            <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: 0 }}>
+              "Sync GeniusPay" lit le solde réel de ton wallet et le synchronise.<br/>
+              "Définir exact" remplace le solde — utilise cette option pour passer de 2 450 000 F test à 0.
+            </p>
           </div>
         </div>
 
@@ -2534,8 +2573,8 @@ function App() {
           </div>
         </div>
 
-        {/* Commission configuration */}
-        <div className="card" style={{ marginBottom: '24px' }}>
+        {/* Commission configuration — admin seulement */}
+        {authAgent?.role === 'admin' && <div className="card" style={{ marginBottom: '24px' }}>
           <div className="card-header">
             <Target size={16} style={{ marginRight: '8px', verticalAlign: 'middle' }} />
             Taux de commission par opération
@@ -2588,7 +2627,7 @@ function App() {
               ))}
             </div>
           </div>
-        </div>
+        </div>}
 
         {/* Monitoring Système */}
         <div className="card" style={{ marginBottom: '24px' }}>

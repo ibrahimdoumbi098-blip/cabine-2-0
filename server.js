@@ -1262,6 +1262,53 @@ app.get('/api/events', (req, res) => {
   });
 });
 
+// Synchroniser le solde local depuis GeniusPay (admin)
+app.post('/api/admin/sync-balance', authMiddleware, async (req, res) => {
+  if (req.agent.role !== 'admin') return res.status(403).json({ error: 'Admin requis.' });
+  try {
+    const data = await geniusPayRequest('GET', '/wallets');
+    const wallets = data?.data?.wallets || [];
+    if (!wallets.length) return res.status(404).json({ error: 'Aucun wallet GeniusPay trouvé.' });
+    const gpWallet = wallets.find(w => w.id === discoveredWalletId) || wallets[0];
+    const gpBalance = Math.floor(parseFloat(gpWallet.available_balance || gpWallet.balance || 0));
+    const targetId = req.body?.agentId || req.agent.agentId;
+    const agent = await queryGet('SELECT wallet_id FROM agents WHERE id = ?', [targetId]);
+    if (!agent) return res.status(404).json({ error: 'Agent introuvable.' });
+    await queryRunUpdate('UPDATE wallets SET balance = ? WHERE id = ?', [gpBalance, agent.wallet_id]);
+    await queryRunInsert(
+      'INSERT INTO balance_ledger (wallet_id, amount, type, description, done_by) VALUES (?, ?, ?, ?, ?)',
+      [agent.wallet_id, gpBalance, 'SYNC_GENIUSPAY', `Sync GeniusPay: ${gpBalance} FCFA`, req.agent.agentId]
+    );
+    notifyWallet(agent.wallet_id, 'balance_update', { balance: gpBalance, type: 'SYNC' });
+    log('INFO', `Sync GeniusPay: solde mis à ${gpBalance} FCFA`, { by: req.agent.email });
+    res.json({ message: `Solde synchronisé depuis GeniusPay : ${new Intl.NumberFormat('fr-FR').format(gpBalance)} FCFA`, balance: gpBalance, gpWalletId: gpWallet.id });
+  } catch (err) {
+    res.status(500).json({ error: `Impossible de lire le solde GeniusPay : ${err.message}` });
+  }
+});
+
+// Définir un solde exact (admin) — pour corriger le solde test
+app.put('/api/admin/set-balance/:agentId', authMiddleware, async (req, res) => {
+  if (req.agent.role !== 'admin') return res.status(403).json({ error: 'Admin requis.' });
+  const { balance, reason = 'Correction manuelle du solde' } = req.body;
+  const newBalance = parseInt(balance, 10);
+  if (isNaN(newBalance) || newBalance < 0) return res.status(400).json({ error: 'Solde invalide.' });
+  try {
+    const targetId = req.params.agentId === 'self' ? req.agent.agentId : req.params.agentId;
+    const agent = await queryGet('SELECT id, wallet_id, name FROM agents WHERE id = ?', [targetId]);
+    if (!agent) return res.status(404).json({ error: 'Agent introuvable.' });
+    const old = await queryGet('SELECT balance FROM wallets WHERE id = ?', [agent.wallet_id]);
+    await queryRunUpdate('UPDATE wallets SET balance = ? WHERE id = ?', [newBalance, agent.wallet_id]);
+    await queryRunInsert(
+      'INSERT INTO balance_ledger (wallet_id, amount, type, description, done_by) VALUES (?, ?, ?, ?, ?)',
+      [agent.wallet_id, newBalance - (old?.balance || 0), 'SET_BALANCE', reason, req.agent.agentId]
+    );
+    notifyWallet(agent.wallet_id, 'balance_update', { balance: newBalance, type: 'SET' });
+    log('INFO', `Solde ${agent.name} défini à ${newBalance} FCFA (était ${old?.balance})`, { by: req.agent.email });
+    res.json({ message: `Solde de ${agent.name} défini à ${new Intl.NumberFormat('fr-FR').format(newBalance)} FCFA`, balance: newBalance });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Configurer seuil d'alerte solde bas
 app.put('/api/wallet/alert-threshold', authMiddleware, async (req, res) => {
   const { threshold } = req.body;
