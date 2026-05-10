@@ -583,6 +583,7 @@ function App() {
   const [rechargeNote, setRechargeNote]       = useState('');
   const [rechargeMsg, setRechargeMsg]         = useState('');
   const [genInvoiceMsg, setGenInvoiceMsg]     = useState('');
+  const [webhookDebug, setWebhookDebug]       = useState(null);
 
   // Change password (for all users)
   const [changePwdCurrent, setChangePwdCurrent]   = useState('');
@@ -2587,6 +2588,64 @@ function App() {
               ))}
             </div>
           </div>
+        </div>
+
+        {/* Monitoring Système */}
+        <div className="card" style={{ marginBottom: '24px' }}>
+          <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+            <span><Radio size={16} style={{ marginRight: '8px', verticalAlign: 'middle' }} />Monitoring &amp; Tests</span>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              <button className="btn-primary" style={{ fontSize: '12px', padding: '6px 14px', background: '#6366f1' }}
+                onClick={async () => {
+                  try {
+                    const res = await apiFetch('/webhooks/last');
+                    const data = await res.json();
+                    setWebhookDebug(data);
+                  } catch (e) { setWebhookDebug({ error: e.message }); }
+                }}>
+                Voir dernier webhook
+              </button>
+              <button className="btn-primary" style={{ fontSize: '12px', padding: '6px 14px', background: '#10b981' }}
+                onClick={async () => {
+                  try {
+                    const res = await apiFetch('/health');
+                    const data = await res.json();
+                    setWebhookDebug(data);
+                  } catch (e) { setWebhookDebug({ error: e.message }); }
+                }}>
+                Santé du serveur
+              </button>
+              <button className="export-btn" style={{ fontSize: '12px' }}
+                onClick={() => setWebhookDebug(null)}>
+                Effacer
+              </button>
+            </div>
+          </div>
+          {webhookDebug && (
+            <div className="card-body">
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+                {/* GeniusPay status card */}
+                <div style={{ padding: '12px 16px', borderRadius: '10px', background: gpStatus.connected ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)', border: `1px solid ${gpStatus.connected ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)'}` }}>
+                  <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px' }}>GENIUSPAY</div>
+                  <div style={{ fontWeight: 700, color: gpStatus.connected ? 'var(--accent-green)' : 'var(--accent-red)' }}>
+                    {gpStatus.connected ? '✅ Connecté' : '❌ Hors ligne'}
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    Mode : {gpStatus.mode === 'live' ? '🔴 Live' : '🧪 Sandbox'}
+                  </div>
+                </div>
+              </div>
+              <div style={{ background: 'var(--bg-hover)', borderRadius: '10px', padding: '14px', fontFamily: 'monospace', fontSize: '12px', color: 'var(--text-secondary)', maxHeight: '320px', overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                {JSON.stringify(webhookDebug, null, 2)}
+              </div>
+            </div>
+          )}
+          {!webhookDebug && (
+            <div className="card-body" style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
+              Cliquez "Voir dernier webhook" après un test GeniusPay pour voir la structure exacte reçue.
+              Utilisez le bouton ▶ dans GeniusPay → Paramètres → Webhooks pour envoyer un test.
+            </div>
+          )}
         </div>
 
         {/* Recharge Modal */}
