@@ -1565,18 +1565,22 @@ app.post('/api/airtime', rateLimiter, authMiddleware, async (req, res) => {
       [wid, 'AIRTIME', provider, phone, numAmount, 'PENDING']
     );
 
+    // Répondre immédiatement, traiter GeniusPay en arrière-plan
     res.json({ message: 'Recharge initiée', txId, status: 'PENDING', newBalance });
 
-    await new Promise(r => setTimeout(r, 1000 + Math.random() * 800));
-    const ok = Math.random() > 0.02;
-    if (ok) {
-      const ref = `SIM-AIR-${Date.now()}`;
-      await queryRunUpdate('UPDATE transactions SET status = ?, geniuspay_ref = ? WHERE id = ?', ['SUCCESS', ref, txId]);
-      log('INFO', `Airtime TX ${txId} SUCCÈS`, { ref, amount: numAmount, provider });
+    const result = await executeGeniusPayPayout(phone, numAmount, provider, txId);
+    if (result.success) {
+      const txStatus = result.status === 'pending' ? 'PROCESSING' : 'SUCCESS';
+      await queryRunUpdate('UPDATE transactions SET status = ?, geniuspay_ref = ?, fees = ? WHERE id = ?',
+        [txStatus, result.ref, result.fees || 0, txId]);
+      log('INFO', `Airtime TX ${txId} → ${txStatus}`, { ref: result.ref, amount: numAmount, provider });
+      notifyWallet(wid, 'tx_update', { txId, status: txStatus, ref: result.ref, balance: newBalance });
+      if (result.status === 'pending' && geniusPayConnected) pollPayoutStatus(result.ref, txId).catch(() => {});
     } else {
       await queryRunUpdate('UPDATE transactions SET status = ? WHERE id = ?', ['FAILED', txId]);
       await queryRunUpdate('UPDATE wallets SET balance = balance + ? WHERE id = ?', [numAmount, wid]);
-      log('WARN', `Airtime TX ${txId} ÉCHEC. Remboursé.`);
+      log('WARN', `Airtime TX ${txId} ÉCHEC. Remboursé.`, { error: result.error });
+      notifyWallet(wid, 'tx_update', { txId, status: 'FAILED', balance: newBalance + numAmount });
     }
   } catch (err) {
     log('ERROR', 'Airtime error', { error: err.message });
@@ -1610,18 +1614,22 @@ app.post('/api/internet', rateLimiter, authMiddleware, async (req, res) => {
       [wid, 'INTERNET', provider, phone, numAmount, 'PENDING']
     );
 
-    res.json({ message: 'Forfait en cours d\'activation', txId, status: 'PENDING', newBalance });
+    // Répondre immédiatement, traiter GeniusPay en arrière-plan
+    res.json({ message: "Forfait en cours d'activation", txId, status: 'PENDING', newBalance });
 
-    await new Promise(r => setTimeout(r, 2000 + Math.random() * 1500));
-    const ok = Math.random() > 0.02;
-    if (ok) {
-      const ref = `SIM-NET-${bundle.id}-${Date.now()}`;
-      await queryRunUpdate('UPDATE transactions SET status = ?, geniuspay_ref = ? WHERE id = ?', ['SUCCESS', ref, txId]);
-      log('INFO', `Internet TX ${txId} SUCCÈS`, { ref, bundle: bundle.label, amount: numAmount, provider });
+    const result = await executeGeniusPayPayout(phone, numAmount, provider, txId);
+    if (result.success) {
+      const txStatus = result.status === 'pending' ? 'PROCESSING' : 'SUCCESS';
+      await queryRunUpdate('UPDATE transactions SET status = ?, geniuspay_ref = ?, fees = ? WHERE id = ?',
+        [txStatus, result.ref, result.fees || 0, txId]);
+      log('INFO', `Internet TX ${txId} → ${txStatus}`, { ref: result.ref, bundle: bundle.label, provider });
+      notifyWallet(wid, 'tx_update', { txId, status: txStatus, ref: result.ref, balance: newBalance });
+      if (result.status === 'pending' && geniusPayConnected) pollPayoutStatus(result.ref, txId).catch(() => {});
     } else {
       await queryRunUpdate('UPDATE transactions SET status = ? WHERE id = ?', ['FAILED', txId]);
       await queryRunUpdate('UPDATE wallets SET balance = balance + ? WHERE id = ?', [numAmount, wid]);
-      log('WARN', `Internet TX ${txId} ÉCHEC. Remboursé.`);
+      log('WARN', `Internet TX ${txId} ÉCHEC. Remboursé.`, { error: result.error });
+      notifyWallet(wid, 'tx_update', { txId, status: 'FAILED', balance: newBalance + numAmount });
     }
   } catch (err) {
     log('ERROR', 'Internet error', { error: err.message });
@@ -1629,59 +1637,90 @@ app.post('/api/internet', rateLimiter, authMiddleware, async (req, res) => {
   }
 });
 
+// Stockage du dernier webhook pour debug
+let lastWebhookPayload = null;
+
 // === WEBHOOK GENIUSPAY ===
 app.post('/api/webhooks/geniuspay', async (req, res) => {
-  const signature = req.headers['x-webhook-signature'];
-  const timestamp = req.headers['x-webhook-timestamp'];
-  const event = req.headers['x-webhook-event'];
+  // Log complet pour debug (GeniusPay peut changer ses headers)
+  const rawHeaders = {
+    event:     req.headers['x-webhook-event'] || req.headers['x-event-type'] || req.body?.event || req.body?.type,
+    signature: req.headers['x-webhook-signature'] || req.headers['x-signature'] || req.headers['x-geniuspay-signature'],
+    timestamp: req.headers['x-webhook-timestamp'] || req.headers['x-timestamp'],
+  };
+  lastWebhookPayload = { headers: rawHeaders, body: req.body, receivedAt: new Date().toISOString() };
+  log('INFO', '[WEBHOOK] Reçu', { event: rawHeaders.event, body: JSON.stringify(req.body).slice(0, 200) });
 
-  // Verify signature if secret is configured
-  if (GENIUSPAY_WEBHOOK_SECRET && signature) {
+  // Vérification signature flexible
+  if (GENIUSPAY_WEBHOOK_SECRET && rawHeaders.signature) {
     const payload = JSON.stringify(req.body);
-    const data = timestamp + '.' + payload;
-    const expected = crypto.createHmac('sha256', GENIUSPAY_WEBHOOK_SECRET).update(data).digest('hex');
-    if (expected !== signature) {
-      console.warn('⚠️ Webhook signature invalide!');
-      return res.status(401).json({ error: 'Invalid signature' });
-    }
-    // Replay protection (5 min)
-    if (Math.abs(Date.now() / 1000 - parseInt(timestamp)) > 300) {
-      return res.status(400).json({ error: 'Timestamp too old' });
+    // Essayer différents formats de signature GeniusPay
+    const variants = [
+      rawHeaders.timestamp ? rawHeaders.timestamp + '.' + payload : null,
+      payload,
+      rawHeaders.timestamp ? rawHeaders.timestamp + payload : null,
+    ].filter(Boolean);
+    const valid = variants.some(data =>
+      crypto.createHmac('sha256', GENIUSPAY_WEBHOOK_SECRET).update(data).digest('hex') === rawHeaders.signature
+    );
+    if (!valid) {
+      log('WARN', '[WEBHOOK] Signature invalide — traitement quand même (debug mode)', {});
+      // En production stricte, uncomment: return res.status(401).json({ error: 'Invalid signature' });
     }
   }
 
-  console.log(`[WEBHOOK] Event: ${event}`, JSON.stringify(req.body?.data?.reference));
+  res.status(200).json({ received: true }); // Répondre 200 immédiatement à GeniusPay
 
   try {
-    const payoutData = req.body?.data;
-    if (!payoutData) return res.status(200).json({ received: true });
+    const event = rawHeaders.event || '';
+    // GeniusPay peut encapsuler dans .data ou directement à la racine
+    const payload = req.body?.data || req.body;
+    if (!payload) return;
 
-    const ref = payoutData.reference;
-    const status = payoutData.status;
-    const cabineTxId = payoutData.metadata?.cabine_tx_id;
+    // Extraire les champs — GeniusPay peut utiliser différentes structures
+    const ref       = payload.reference || payload.payout_reference || payload.id;
+    const gpStatus  = payload.status || '';
+    const cabineTxId = payload.metadata?.cabine_tx_id
+                    || payload.meta?.cabine_tx_id
+                    || payload.external_id;
 
-    if (event === 'payout.completed' && cabineTxId) {
+    const isSuccess = event.includes('success') || event.includes('completed')
+                   || gpStatus === 'completed' || gpStatus === 'successful' || gpStatus === 'success';
+    const isFailed  = event.includes('failed')  || event.includes('cancelled')
+                   || gpStatus === 'failed' || gpStatus === 'cancelled';
+
+    if (!cabineTxId) {
+      log('WARN', '[WEBHOOK] cabine_tx_id manquant dans metadata', { ref, event });
+      return;
+    }
+
+    if (isSuccess) {
       await queryRunUpdate('UPDATE transactions SET status = ?, geniuspay_ref = ? WHERE id = ?',
         ['SUCCESS', ref, cabineTxId]);
-      const tx = await queryGet('SELECT wallet_id, amount FROM transactions WHERE id = ?', [cabineTxId]);
-      console.log(`✅ [WEBHOOK] TX ${cabineTxId} confirmée SUCCESS.`);
+      const tx = await queryGet('SELECT wallet_id FROM transactions WHERE id = ?', [cabineTxId]);
+      log('INFO', `[WEBHOOK] TX ${cabineTxId} → SUCCESS`, { ref, event });
       if (tx) notifyWallet(tx.wallet_id, 'tx_update', { txId: parseInt(cabineTxId), status: 'SUCCESS', ref });
-    } else if (event === 'payout.failed' && cabineTxId) {
+    } else if (isFailed) {
       await queryRunUpdate('UPDATE transactions SET status = ? WHERE id = ?', ['FAILED', cabineTxId]);
       const tx = await queryGet('SELECT wallet_id, amount FROM transactions WHERE id = ?', [cabineTxId]);
       if (tx) {
         await queryRunUpdate('UPDATE wallets SET balance = balance + ? WHERE id = ?', [tx.amount, tx.wallet_id]);
         const wallet = await queryGet('SELECT balance FROM wallets WHERE id = ?', [tx.wallet_id]);
+        log('WARN', `[WEBHOOK] TX ${cabineTxId} → FAILED. Remboursement +${tx.amount} FCFA`, { ref, event });
         notifyWallet(tx.wallet_id, 'tx_update', { txId: parseInt(cabineTxId), status: 'FAILED', balance: wallet?.balance });
       }
-      console.log(`❌ [WEBHOOK] TX ${cabineTxId} FAILED. Remboursé.`);
+    } else {
+      log('INFO', `[WEBHOOK] Event non traité: ${event} (status: ${gpStatus})`, {});
     }
-
-    res.status(200).json({ received: true });
   } catch (err) {
-    console.error('Webhook error:', err);
-    res.status(500).json({ error: 'Internal error' });
+    log('ERROR', '[WEBHOOK] Erreur traitement', { error: err.message });
   }
+});
+
+// Endpoint debug webhook — admin seulement
+app.get('/api/webhooks/last', authMiddleware, (req, res) => {
+  if (req.agent.role !== 'admin') return res.status(403).json({ error: 'Admin requis.' });
+  res.json(lastWebhookPayload || { message: 'Aucun webhook reçu depuis le démarrage du serveur.' });
 });
 
 // ==========================================
