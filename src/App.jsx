@@ -949,6 +949,52 @@ function App() {
     if (authAgent) fetchCommissions();
   }, [authAgent]);
 
+  const sseRef = useRef(null);
+
+  // SSE — connexion temps réel, remplace le polling 3s
+  const connectSSE = useCallback(() => {
+    if (sseRef.current) sseRef.current.close();
+    const token = getToken();
+    if (!token) return;
+    const es = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
+    sseRef.current = es;
+
+    es.addEventListener('tx_update', (e) => {
+      const d = JSON.parse(e.data);
+      // Mise à jour immédiate du statut dans la liste des transactions
+      setTransactions(prev => prev.map(tx =>
+        tx.id === d.txId ? { ...tx, status: d.status, geniuspay_ref: d.ref || tx.geniuspay_ref } : tx
+      ));
+      if (d.balance !== undefined) setBalance(d.balance);
+
+      if (pendingTxRef.current === d.txId) {
+        if (d.status === 'SUCCESS' || d.status === 'FAILED') {
+          fetchData(); // rafraîchit solde + liste complète
+        }
+      }
+    });
+
+    es.addEventListener('balance_update', (e) => {
+      const d = JSON.parse(e.data);
+      if (d.balance !== undefined) {
+        setBalance(d.balance);
+        if (d.type === 'RECHARGE') addToast('success', 'Compte rechargé', `+${new Intl.NumberFormat('fr-FR').format(d.amount)} FCFA crédités.`);
+      }
+    });
+
+    es.onerror = () => {
+      es.close();
+      sseRef.current = null;
+      // Reconnexion après 5s si toujours authentifié
+      setTimeout(() => { if (getToken()) connectSSE(); }, 5000);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (authAgent) connectSSE();
+    return () => { sseRef.current?.close(); sseRef.current = null; };
+  }, [authAgent]);
+
   useEffect(() => {
     fetchBundles();
     KioskService.restore();
@@ -980,9 +1026,9 @@ function App() {
     fetchData();
     fetchGpStatus();
     // Poll only when user is on dashboard or transactions (live data matters)
-    const shouldPoll = activeTab === 'dashboard' || activeTab === 'transactions';
-    const interval = shouldPoll ? setInterval(fetchData, 3000) : null;
-    const gpInterval = setInterval(fetchGpStatus, 20000);
+    // Polling de sécurité 30s (SSE gère le temps réel, le poll garantit la cohérence)
+    const interval = setInterval(fetchData, 30000);
+    const gpInterval = setInterval(fetchGpStatus, 30000);
     const goOffline = () => { offlineCount.current = 10; setIsOffline(true); };
     const goOnline = () => { offlineCount.current = 0; setIsOffline(false); fetchData(); };
     window.addEventListener('offline', goOffline);

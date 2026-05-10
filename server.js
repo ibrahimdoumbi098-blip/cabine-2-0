@@ -272,6 +272,29 @@ setInterval(() => {
   for (const [k, v] of resetTokens) if (now > v.expires) resetTokens.delete(k);
 }, 3600000);
 
+// ==========================================
+// SERVER-SENT EVENTS — Push temps réel vers les navigateurs
+// ==========================================
+const sseClients = new Map(); // walletId → Set<res>
+
+function notifyWallet(walletId, event, data) {
+  const clients = sseClients.get(String(walletId));
+  if (!clients || clients.size === 0) return;
+  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const client of clients) {
+    try { client.write(payload); } catch { clients.delete(client); }
+  }
+}
+
+function notifyAll(event, data) {
+  for (const clients of sseClients.values()) {
+    const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+    for (const client of clients) {
+      try { client.write(payload); } catch { clients.delete(client); }
+    }
+  }
+}
+
 let discoveredWalletId = GENIUSPAY_WALLET_ID;
 let geniusPayConnected = false;
 
@@ -1098,6 +1121,7 @@ app.post('/api/admin/recharge/:agentId', authMiddleware, async (req, res) => {
     );
     const wallet = await queryGet('SELECT balance FROM wallets WHERE id = ?', [agent.wallet_id]);
     log('INFO', `Recharge ${agent.name}: +${numAmount} FCFA`, { by: req.agent.email });
+    notifyWallet(agent.wallet_id, 'balance_update', { balance: wallet.balance, type: 'RECHARGE', amount: numAmount });
     res.json({ message: `+${numAmount} FCFA crédités à ${agent.name}`, newBalance: wallet.balance });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1199,6 +1223,43 @@ app.put('/api/commissions/:type', authMiddleware, async (req, res) => {
     log('INFO', `Commission ${type} → ${rate}%`, { by: req.agent.email });
     res.json({ type, rate_percent: rate, message: `Commission ${type} mise à jour à ${rate}%.` });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ==========================================
+// SSE ENDPOINT — stream temps réel des mises à jour
+// ==========================================
+app.get('/api/events', (req, res) => {
+  // EventSource ne supporte pas les headers custom — token en query param
+  const token = req.query.token;
+  if (!token) return res.status(401).end();
+  if (tokenBlacklist.has(token)) return res.status(401).end();
+  let agent;
+  try { agent = jwt.verify(token, JWT_SECRET); } catch { return res.status(401).end(); }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // désactive le buffering Nginx/Render
+  res.flushHeaders();
+
+  const wid = String(agent.walletId);
+  if (!sseClients.has(wid)) sseClients.set(wid, new Set());
+  sseClients.get(wid).add(res);
+  log('INFO', 'SSE connecté', { walletId: wid, agent: agent.email });
+
+  res.write(`event: connected\ndata: ${JSON.stringify({ walletId: wid, ts: Date.now() })}\n\n`);
+
+  // Heartbeat toutes les 25s pour maintenir la connexion vivante
+  const heartbeat = setInterval(() => {
+    try { res.write(`: ping\n\n`); } catch { clearInterval(heartbeat); }
+  }, 25000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    sseClients.get(wid)?.delete(res);
+    if (sseClients.get(wid)?.size === 0) sseClients.delete(wid);
+    log('INFO', 'SSE déconnecté', { walletId: wid });
+  });
 });
 
 // Configurer seuil d'alerte solde bas
@@ -1420,11 +1481,13 @@ app.post('/api/transfer', rateLimiter, authMiddleware, async (req, res) => {
     }
 
     if (result.success) {
+      const txStatus = result.status === 'pending' ? 'PROCESSING' : 'SUCCESS';
       await queryRunUpdate(
         'UPDATE transactions SET geniuspay_ref = ?, geniuspay_payout_id = ?, fees = ?, status = ? WHERE id = ?',
-        [result.ref, result.payoutId || '', result.fees || 0, result.status === 'pending' ? 'PROCESSING' : 'SUCCESS', txId]
+        [result.ref, result.payoutId || '', result.fees || 0, txStatus, txId]
       );
       console.log(`✅ TX ${txId} envoyée → Ref: ${result.ref}`);
+      notifyWallet(wid, 'tx_update', { txId, status: txStatus, ref: result.ref, balance: newBalance });
 
       // Si le payout est encore pending, poll le statut
       if (result.status === 'pending' && geniusPayConnected) {
@@ -1432,7 +1495,8 @@ app.post('/api/transfer', rateLimiter, authMiddleware, async (req, res) => {
       }
     } else {
       await queryRunUpdate('UPDATE transactions SET status = ? WHERE id = ?', ['FAILED', txId]);
-      await queryRunUpdate('UPDATE wallets SET balance = balance + ? WHERE id = 1', [numAmount]);
+      const refundedBalance = newBalance + numAmount;
+      await queryRunUpdate('UPDATE wallets SET balance = balance + ? WHERE id = ?', [numAmount, wid]);
       console.log(`❌ TX ${txId} échouée: ${result.error}. Remboursement OK.`);
     }
   } catch (err) {
@@ -1467,7 +1531,9 @@ app.post('/api/retrait', rateLimiter, authMiddleware, async (req, res) => {
       'UPDATE transactions SET status = ?, geniuspay_ref = ? WHERE id = ?',
       ['SUCCESS', ref, txId]
     );
+    const newBal = (await queryGet('SELECT balance FROM wallets WHERE id = ?', [wid]))?.balance;
     log('INFO', `Retrait TX ${txId} SUCCÈS`, { ref, amount: numAmount, provider });
+    notifyWallet(wid, 'tx_update', { txId, status: 'SUCCESS', ref, balance: newBal });
     res.json({ message: 'Retrait enregistré', txId, status: 'SUCCESS' });
   } catch (err) {
     log('ERROR', 'Retrait error', { error: err.message });
@@ -1597,11 +1663,17 @@ app.post('/api/webhooks/geniuspay', async (req, res) => {
     if (event === 'payout.completed' && cabineTxId) {
       await queryRunUpdate('UPDATE transactions SET status = ?, geniuspay_ref = ? WHERE id = ?',
         ['SUCCESS', ref, cabineTxId]);
+      const tx = await queryGet('SELECT wallet_id, amount FROM transactions WHERE id = ?', [cabineTxId]);
       console.log(`✅ [WEBHOOK] TX ${cabineTxId} confirmée SUCCESS.`);
+      if (tx) notifyWallet(tx.wallet_id, 'tx_update', { txId: parseInt(cabineTxId), status: 'SUCCESS', ref });
     } else if (event === 'payout.failed' && cabineTxId) {
       await queryRunUpdate('UPDATE transactions SET status = ? WHERE id = ?', ['FAILED', cabineTxId]);
-      const tx = await queryGet('SELECT amount FROM transactions WHERE id = ?', [cabineTxId]);
-      if (tx) await queryRunUpdate('UPDATE wallets SET balance = balance + ? WHERE id = 1', [tx.amount]);
+      const tx = await queryGet('SELECT wallet_id, amount FROM transactions WHERE id = ?', [cabineTxId]);
+      if (tx) {
+        await queryRunUpdate('UPDATE wallets SET balance = balance + ? WHERE id = ?', [tx.amount, tx.wallet_id]);
+        const wallet = await queryGet('SELECT balance FROM wallets WHERE id = ?', [tx.wallet_id]);
+        notifyWallet(tx.wallet_id, 'tx_update', { txId: parseInt(cabineTxId), status: 'FAILED', balance: wallet?.balance });
+      }
       console.log(`❌ [WEBHOOK] TX ${cabineTxId} FAILED. Remboursé.`);
     }
 
