@@ -941,16 +941,28 @@ function App() {
   };
 
   useEffect(() => {
-    if (activeTab === 'analytics') fetchAnalytics();
-    if (activeTab === 'settings' && authAgent?.role === 'admin') fetchAgents();
-    if (activeTab === 'admin' && authAgent?.role === 'admin') { fetchAdminOverview(); fetchAdminInvoices(); fetchCommissions(); }
+    if (activeTab === 'transactions') setTxBadge(0); // efface le badge quand on ouvre Historique
   }, [activeTab]);
 
   useEffect(() => {
-    if (authAgent) fetchCommissions();
-  }, [authAgent]);
+    if (!authAgent) return; // attendre que l'auth soit résolue
+    if (activeTab === 'analytics') fetchAnalytics();
+    if (activeTab === 'settings' && authAgent.role === 'admin') fetchAgents();
+    if (activeTab === 'admin' && authAgent.role === 'admin') { fetchAdminOverview(); fetchAdminInvoices(); fetchCommissions(); }
+  }, [activeTab, authAgent?.id]); // authAgent.id en dépendance — recharge si l'auth change
+
+  useEffect(() => {
+    if (!authAgent) return;
+    fetchCommissions();
+    // Charger les données admin dès le login si on est déjà sur le bon onglet
+    if (authAgent.role === 'admin') {
+      if (activeTab === 'admin') { fetchAdminOverview(); fetchAdminInvoices(); }
+      if (activeTab === 'settings') fetchAgents();
+    }
+  }, [authAgent?.id]);
 
   const sseRef = useRef(null);
+  const [txBadge, setTxBadge] = useState(0); // badge "nouvelles tx" sur Historique
 
   // SSE — connexion temps réel, remplace le polling 3s
   const connectSSE = useCallback(() => {
@@ -962,10 +974,13 @@ function App() {
 
     es.addEventListener('tx_update', (e) => {
       const d = JSON.parse(e.data);
-      // Mise à jour immédiate du statut dans la liste des transactions
       setTransactions(prev => prev.map(tx =>
         tx.id === d.txId ? { ...tx, status: d.status, geniuspay_ref: d.ref || tx.geniuspay_ref } : tx
       ));
+      // Badge sur Historique si l'onglet n'est pas actif
+      if (d.status === 'SUCCESS' || d.status === 'FAILED') {
+        setTxBadge(n => n + 1);
+      }
       if (d.balance !== undefined) setBalance(d.balance);
 
       if (pendingTxRef.current === d.txId) {
@@ -2020,129 +2035,22 @@ function App() {
           </div>
         </div>
 
-        {/* Agent Management — admin only */}
+        {/* Agent Management — lien vers Admin tab (doublon supprimé) */}
         {authAgent?.role === 'admin' && (
           <div className="card settings-panel" style={{gridColumn: '1 / -1'}}>
             <div className="card-header">
               <Activity size={18} style={{marginRight: '8px', verticalAlign: 'middle'}}/>
               Gestion des agents
             </div>
-            <div className="card-body">
-
-              {/* Create agent form */}
-              <div style={{marginBottom: '24px'}}>
-                <div style={{fontWeight: 600, fontSize: '14px', marginBottom: '12px'}}>Créer un nouvel agent</div>
-                <form onSubmit={createAgent}>
-                  <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '12px'}}>
-                    <div className="form-group" style={{margin: 0}}>
-                      <label>Nom complet</label>
-                      <input type="text" placeholder="Kouassi Bernard" required
-                        value={newAgentName} onChange={e => setNewAgentName(e.target.value)} />
-                    </div>
-                    <div className="form-group" style={{margin: 0}}>
-                      <label>Email</label>
-                      <input type="email" placeholder="agent@email.com" required
-                        value={newAgentEmail} onChange={e => setNewAgentEmail(e.target.value)} />
-                    </div>
-                    <div className="form-group" style={{margin: 0}}>
-                      <label>Mot de passe</label>
-                      <input type="password" placeholder="Min. 6 caractères" required minLength={6}
-                        value={newAgentPass} onChange={e => setNewAgentPass(e.target.value)} />
-                    </div>
-                    <div className="form-group" style={{margin: 0}}>
-                      <label>Solde initial (FCFA)</label>
-                      <input type="number" placeholder="0" min="0"
-                        value={newAgentBalance} onChange={e => setNewAgentBalance(e.target.value)} />
-                    </div>
-                  </div>
-                  <button type="submit" className="btn-primary" style={{minWidth: '160px'}}>
-                    <Activity size={15}/> Créer l'agent
-                  </button>
-                  {agentFormMsg && (
-                    <p style={{marginTop: '10px', fontSize: '13px',
-                      color: agentFormMsg.startsWith('✅') ? 'var(--accent-green)' : 'var(--accent-red)'}}>
-                      {agentFormMsg}
-                    </p>
-                  )}
-                </form>
+            <div className="card-body" style={{display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:'16px'}}>
+              <div>
+                <div style={{fontWeight: 600, marginBottom: '4px'}}>Créer, recharger et superviser les agents</div>
+                <div style={{fontSize: '13px', color: 'var(--text-secondary)'}}>Toute la gestion se fait dans l'onglet Supervision</div>
               </div>
-
-              {/* Agents list */}
-              <div style={{borderTop: '1px solid var(--border-color)', paddingTop: '16px'}}>
-                <div style={{fontWeight: 600, fontSize: '14px', marginBottom: '12px'}}>
-                  Agents actifs
-                  <span style={{fontSize: '12px', fontWeight: 400, color: 'var(--text-muted)', marginLeft: '8px'}}>
-                    ({agentsList.length} agent{agentsList.length !== 1 ? 's' : ''})
-                  </span>
-                </div>
-                {agentsLoading ? (
-                  <div style={{color: 'var(--text-muted)', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '8px'}}>
-                    <RefreshCw size={14} style={{animation: 'spin 1s linear infinite'}}/> Chargement...
-                  </div>
-                ) : agentsList.length === 0 ? (
-                  <p style={{color: 'var(--text-muted)', fontSize: '14px'}}>Aucun agent trouvé.</p>
-                ) : (
-                  <div style={{display: 'flex', flexDirection: 'column', gap: '8px'}}>
-                    {agentsList.map(ag => (
-                      <div key={ag.id} style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                        flexWrap: 'wrap', gap: '12px',
-                        padding: '14px 16px', borderRadius: '12px',
-                        background: 'var(--bg-hover)',
-                        border: `1px solid ${ag.active ? 'var(--border-color)' : 'rgba(239,68,68,0.2)'}`,
-                        opacity: ag.active ? 1 : 0.65,
-                      }}>
-                        <div style={{display: 'flex', alignItems: 'center', gap: '12px'}}>
-                          <div style={{
-                            width: 38, height: 38, borderRadius: '50%',
-                            background: ag.role === 'admin'
-                              ? 'linear-gradient(135deg,#6366f1,#8b5cf6)'
-                              : 'linear-gradient(135deg,#10b981,#059669)',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            color: 'white', fontWeight: 700, fontSize: '14px', flexShrink: 0,
-                          }}>
-                            {ag.name.split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase()}
-                          </div>
-                          <div>
-                            <div style={{fontWeight: 600, fontSize: '14px', color: 'var(--text-dark)'}}>
-                              {ag.name}
-                              {ag.role === 'admin' && (
-                                <span style={{marginLeft: '8px', fontSize: '11px', background: 'rgba(99,102,241,0.1)',
-                                  color: 'var(--accent-primary)', padding: '2px 8px', borderRadius: '20px', fontWeight: 600}}>
-                                  Admin
-                                </span>
-                              )}
-                            </div>
-                            <div style={{fontSize: '12px', color: 'var(--text-muted)'}}>{ag.email}</div>
-                          </div>
-                        </div>
-                        <div style={{display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap'}}>
-                          <div style={{textAlign: 'right'}}>
-                            <div style={{fontSize: '13px', fontWeight: 700, color: 'var(--text-dark)'}}>
-                              {new Intl.NumberFormat('fr-FR').format(ag.balance || 0)} FCFA
-                            </div>
-                            <div style={{fontSize: '11px', color: ag.active ? 'var(--accent-green)' : 'var(--accent-red)'}}>
-                              {ag.active ? '● Actif' : '● Suspendu'}
-                            </div>
-                          </div>
-                          {ag.id !== authAgent?.id && (
-                            <button
-                              className={ag.active ? 'btn-secondary' : 'btn-primary'}
-                              style={{
-                                fontSize: '12px', padding: '6px 14px', minWidth: '90px',
-                                ...(ag.active ? {color: 'var(--accent-red)'} : {background: 'var(--accent-green)'}),
-                              }}
-                              onClick={() => toggleAgent(ag.id)}
-                            >
-                              {ag.active ? 'Suspendre' : 'Réactiver'}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <button className="btn-primary" onClick={() => setActiveTab('admin')} style={{minWidth: '160px'}}>
+                <ShieldCheck size={15} style={{marginRight: '6px', verticalAlign: 'middle'}}/>
+                Aller à Supervision
+              </button>
             </div>
           </div>
         )}
@@ -2176,6 +2084,47 @@ function App() {
         <div className="animate-in" style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',minHeight:'300px',gap:'16px'}}>
           <RefreshCw size={28} style={{animation:'spin 1s linear infinite',color:'var(--accent-primary)'}}/>
           <p style={{color:'var(--text-muted)'}}>Chargement des analytiques...</p>
+        </div>
+      );
+    }
+
+    // Vue simplifiée pour agents (pas de graphes complexes)
+    if (authAgent?.role !== 'admin') {
+      const today = analytics.today || {};
+      const yesterday = analytics.yesterday || {};
+      const todayVol = parseInt(today.volume) || 0;
+      const todayTx = parseInt(today.total) || 0;
+      const todaySuccess = parseInt(today.success) || 0;
+      const todayRate = todayTx > 0 ? Math.round(todaySuccess / todayTx * 100) : 0;
+      const yesterdayVol = parseInt(yesterday.volume) || 0;
+      return (
+        <div className="animate-in">
+          <div className="dashboard-header" style={{marginBottom: '20px'}}>
+            <div className="header-title"><h1>Mes Performances</h1><p>Résumé de votre activité</p></div>
+            <button className="export-btn" onClick={fetchAnalytics}><RefreshCw size={13}/> Actualiser</button>
+          </div>
+          <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))', gap:'14px', marginBottom:'24px'}}>
+            {[
+              { label: "Transactions auj.", value: todayTx, icon: <Activity size={20}/>, color: '#6366f1', bg: 'rgba(99,102,241,0.1)' },
+              { label: "Volume auj.", value: `${new Intl.NumberFormat('fr-FR',{notation:'compact',maximumFractionDigits:1}).format(todayVol)} F`, icon: <Banknote size={20}/>, color: '#10b981', bg: 'rgba(16,185,129,0.1)' },
+              { label: "Taux de succès", value: `${todayRate}%`, icon: <Target size={20}/>, color: todayRate >= 80 ? '#10b981' : '#f59e0b', bg: `rgba(${todayRate >= 80 ? '16,185,129' : '245,158,11'},0.1)` },
+              { label: "Vol. hier", value: `${new Intl.NumberFormat('fr-FR',{notation:'compact',maximumFractionDigits:1}).format(yesterdayVol)} F`, icon: <TrendingUp size={20}/>, color: '#3b82f6', bg: 'rgba(59,130,246,0.1)' },
+            ].map((c,i) => (
+              <div key={i} style={{background:'var(--bg-card)',border:'1px solid var(--border-color)',borderRadius:'14px',padding:'16px',display:'flex',alignItems:'center',gap:'12px'}}>
+                <div style={{width:40,height:40,borderRadius:'10px',background:c.bg,color:c.color,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>{c.icon}</div>
+                <div>
+                  <div style={{fontSize:'12px',color:'var(--text-muted)',marginBottom:'2px'}}>{c.label}</div>
+                  <div style={{fontSize:'20px',fontWeight:800,color:c.color,lineHeight:1.2}}>{c.value}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="card">
+            <div className="card-header">Activité horaire — Aujourd'hui</div>
+            <div className="card-body">
+              <HourlyHeatmap hourly={analytics.hourly || []}/>
+            </div>
+          </div>
         </div>
       );
     }
@@ -2436,7 +2385,7 @@ function App() {
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                   <thead>
                     <tr style={{ borderBottom: '1px solid var(--border-color)', background: 'var(--bg-hover)' }}>
-                      {['Agent', 'Solde', 'Tx auj.', 'Vol auj.', 'Statut', 'Action'].map(h => (
+                      {['Agent', 'Solde', 'Tx auj.', 'Vol auj.', 'Limite/jour', 'Statut', 'Action'].map(h => (
                         <th key={h} style={{ padding: '10px 14px', textAlign: h === 'Agent' ? 'left' : 'center', fontWeight: 600, color: 'var(--text-muted)', fontSize: '11px', whiteSpace: 'nowrap' }}>{h}</th>
                       ))}
                     </tr>
@@ -2470,6 +2419,23 @@ function App() {
                         </td>
                         <td style={{ padding: '12px 14px', textAlign: 'center', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
                           {fmtC(ag.today_volume)} F
+                        </td>
+                        <td style={{ padding: '12px 14px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                          <button
+                            style={{ background: 'none', border: '1px dashed var(--border-color)', borderRadius: '8px', padding: '4px 10px', fontSize: '12px', color: 'var(--text-secondary)', cursor: 'pointer' }}
+                            title="Cliquer pour modifier la limite journalière"
+                            onClick={() => {
+                              const v = prompt(`Limite journalière pour ${ag.name} (FCFA) :\nActuelle: ${new Intl.NumberFormat('fr-FR').format(ag.daily_limit || 2000000)} FCFA`);
+                              if (!v) return;
+                              const n = parseInt(v.replace(/\s/g,''), 10);
+                              if (isNaN(n) || n < 0) return;
+                              apiFetch(`/agents/${ag.id}/limits`, { method: 'PUT', body: JSON.stringify({ daily_limit: n }) })
+                                .then(() => { addToast('success', 'Limite mise à jour', `${ag.name}: ${new Intl.NumberFormat('fr-FR').format(n)} FCFA/jour`); fetchAdminOverview(); })
+                                .catch(e => addToast('error', 'Erreur', e.message));
+                            }}
+                          >
+                            {new Intl.NumberFormat('fr-FR', {notation:'compact'}).format(ag.daily_limit || 2000000)} ✎
+                          </button>
                         </td>
                         <td style={{ padding: '12px 14px', textAlign: 'center' }}>
                           <span style={{
@@ -3116,7 +3082,14 @@ function App() {
               className={`bottom-nav-item${activeTab === 'transactions' ? ' active' : ''}`}
               onClick={() => setActiveTab('transactions')}
             >
-              <div className="bnav-icon"><History size={20} /></div>
+              <div className="bnav-icon" style={{position:'relative'}}>
+                <History size={20} />
+                {txBadge > 0 && (
+                  <span style={{position:'absolute',top:-4,right:-4,background:'#ef4444',color:'white',fontSize:'10px',fontWeight:800,borderRadius:'999px',minWidth:16,height:16,display:'flex',alignItems:'center',justifyContent:'center',padding:'0 3px',lineHeight:1}}>
+                    {txBadge > 9 ? '9+' : txBadge}
+                  </span>
+                )}
+              </div>
               <span>Historique</span>
             </button>
             <button

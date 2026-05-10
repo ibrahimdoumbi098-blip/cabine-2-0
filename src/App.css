@@ -1408,3 +1408,27 @@ html.kiosk .kiosk-exit-btn:active { opacity: 1; }
 @media (max-width: 480px) {
   .analytics-kpi-row { grid-template-columns: 1fr; }
 }
+
+/* ── SUBMIT BUTTON — Sticky sur mobile ── */
+@media (max-width: 768px) {
+  .submit-btn {
+    position: sticky;
+    bottom: calc(var(--bnav-height, 68px) + 8px);
+    z-index: 20;
+    box-shadow: 0 -4px 20px rgba(0,0,0,0.15);
+  }
+}
+
+/* ── TRANSACTION BADGE ── */
+.bnav-icon { position: relative; }
+
+/* ── QUICK AMOUNTS — scroll horizontal sur mobile ── */
+@media (max-width: 480px) {
+  .quick-amounts {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+  }
+  .quick-amount-btn { flex-shrink: 0; }
+}
