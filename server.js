@@ -267,9 +267,12 @@ setInterval(() => {
 
 // Reset tokens (mot de passe oublié)
 const resetTokens = new Map(); // email → { token, expires }
+// Email verification tokens (KYC step 1)
+const emailVerifyTokens = new Map(); // token → { agentId, email, expires }
 setInterval(() => {
   const now = Date.now();
   for (const [k, v] of resetTokens) if (now > v.expires) resetTokens.delete(k);
+  for (const [k, v] of emailVerifyTokens) if (now > v.expires) emailVerifyTokens.delete(k);
 }, 3600000);
 
 // ==========================================
@@ -494,6 +497,9 @@ async function initDb() {
       // Migrate wallet columns if not exists
       await pool.query('ALTER TABLE wallets ADD COLUMN IF NOT EXISTS daily_limit INTEGER DEFAULT 2000000');
       await pool.query('ALTER TABLE wallets ADD COLUMN IF NOT EXISTS alert_threshold INTEGER DEFAULT 50000');
+      await pool.query('ALTER TABLE agents ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT false');
+      // Ibrahim est admin → email vérifié d'office
+      await pool.query("UPDATE agents SET email_verified = TRUE WHERE role = 'admin'");
       for (const c of COMMISSION_DEFAULTS) {
         await pool.query(
           'INSERT INTO commission_config (type, label, rate_percent) VALUES ($1, $2, $3) ON CONFLICT (type) DO NOTHING',
@@ -552,6 +558,7 @@ async function initDb() {
         });
       });
       // Migrate: add missing columns
+      await new Promise(resolve => sqliteDb.run('ALTER TABLE agents ADD COLUMN email_verified INTEGER DEFAULT 0', () => resolve()));
       const cols = ['geniuspay_payout_id', 'idempotency_key', 'fees', 'geniuspay_provider'];
       for (const col of cols) {
         await new Promise((resolve) => {
@@ -810,7 +817,7 @@ async function sendEmail(to, subject, html) {
   }
 }
 
-function agentWelcomeHtml(name, email, password) {
+function agentWelcomeHtml(name, email, password, verifyUrl = null) {
   return `<!DOCTYPE html>
 <html lang="fr">
 <body style="margin:0;padding:0;background:#f4f4f5;font-family:sans-serif;">
@@ -835,6 +842,9 @@ function agentWelcomeHtml(name, email, password) {
           <strong style="font-size:18px;color:#6366f1;font-family:monospace;letter-spacing:2px">${password}</strong>
         </div>
       </div>
+      ${verifyUrl ? `<a href="${verifyUrl}" style="display:block;text-align:center;background:linear-gradient(135deg,#10b981,#059669);color:#fff;text-decoration:none;padding:14px 24px;border-radius:12px;font-weight:700;font-size:15px;margin-bottom:12px">
+        ✅ Vérifier mon email &amp; activer le compte
+      </a>` : ''}
       <a href="https://cabine.ci" style="display:block;text-align:center;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;text-decoration:none;padding:14px 24px;border-radius:12px;font-weight:700;font-size:15px">
         Se connecter sur Cabine 2.0
       </a>
@@ -947,16 +957,16 @@ app.post('/api/auth/login', authRateLimiter, async (req, res) => {
       { expiresIn: '7d' }
     );
     log('INFO', 'Login réussi', { agent: agent.email, role: agent.role });
-    res.json({ token, agent: { id: agent.id, name: agent.name, email: agent.email, role: agent.role, walletId: agent.wallet_id } });
+    res.json({ token, agent: { id: agent.id, name: agent.name, email: agent.email, role: agent.role, walletId: agent.wallet_id, emailVerified: !!agent.email_verified } });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // Me
 app.get('/api/auth/me', authMiddleware, async (req, res) => {
   try {
-    const agent = await queryGet('SELECT id, name, email, role, wallet_id FROM agents WHERE id = ?', [req.agent.agentId]);
+    const agent = await queryGet('SELECT id, name, email, role, wallet_id, email_verified FROM agents WHERE id = ?', [req.agent.agentId]);
     if (!agent) return res.status(404).json({ error: 'Agent introuvable.' });
-    res.json({ ...agent, walletId: agent.wallet_id });
+    res.json({ ...agent, walletId: agent.wallet_id, emailVerified: !!agent.email_verified });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -977,8 +987,12 @@ app.post('/api/auth/register', authMiddleware, async (req, res) => {
       [name, email.toLowerCase().trim(), hash, 'agent', walletId]
     );
     log('INFO', 'Nouvel agent créé', { name, email, walletId, by: req.agent.email });
-    // Email de bienvenue (non-bloquant)
-    sendEmail(email, 'Bienvenue sur Cabine 2.0 — Vos accès', agentWelcomeHtml(name, email, password)).catch(() => {});
+    // Générer token de vérification email (KYC step 1)
+    const verifyToken = crypto.randomBytes(32).toString('hex');
+    emailVerifyTokens.set(verifyToken, { agentId, email: email.toLowerCase(), expires: Date.now() + 86400000 });
+    const verifyUrl = `${APP_DOMAIN}/?verify_email=${verifyToken}`;
+    // Email de bienvenue avec lien de vérification (non-bloquant)
+    sendEmail(email, 'Bienvenue sur Cabine 2.0 — Activez votre compte', agentWelcomeHtml(name, email, password, verifyUrl)).catch(() => {});
     res.json({ id: agentId, name, email, walletId, message: 'Agent créé avec succès. PIN par défaut: 1234' });
   } catch (err) {
     if (err.message?.includes('UNIQUE') || err.code === '23505') {
@@ -1009,6 +1023,36 @@ app.put('/api/agents/:id/toggle', authMiddleware, async (req, res) => {
     await queryRunUpdate('UPDATE agents SET active = ? WHERE id = ?', [newActive, req.params.id]);
     res.json({ active: newActive });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Vérification email (KYC step 1)
+app.get('/api/auth/verify-email', async (req, res) => {
+  const { token } = req.query;
+  const entry = token ? emailVerifyTokens.get(token) : null;
+  if (!entry || Date.now() > entry.expires) {
+    return res.redirect(`${APP_DOMAIN}/?error=invalid_verify_token`);
+  }
+  try {
+    await queryRunUpdate('UPDATE agents SET email_verified = TRUE WHERE id = ?', [entry.agentId]);
+    emailVerifyTokens.delete(token);
+    log('INFO', 'Email vérifié (KYC)', { email: entry.email });
+    res.redirect(`${APP_DOMAIN}/?verified=1`);
+  } catch (err) {
+    res.redirect(`${APP_DOMAIN}/?error=verify_failed`);
+  }
+});
+
+// Renvoyer le lien de vérification
+app.post('/api/auth/resend-verify', authMiddleware, async (req, res) => {
+  if (req.agent.role === 'admin') return res.json({ message: 'Compte admin déjà vérifié.' });
+  const agent = await queryGet('SELECT id, name, email, email_verified FROM agents WHERE id = ?', [req.agent.agentId]);
+  if (!agent) return res.status(404).json({ error: 'Agent introuvable.' });
+  if (agent.email_verified) return res.json({ message: 'Email déjà vérifié.' });
+  const verifyToken = crypto.randomBytes(32).toString('hex');
+  emailVerifyTokens.set(verifyToken, { agentId: agent.id, email: agent.email, expires: Date.now() + 86400000 });
+  const verifyUrl = `${APP_DOMAIN}/?verify_email=${verifyToken}`;
+  await sendEmail(agent.email, '✅ Vérifiez votre email Cabine 2.0', `<p>Cliquez ici pour vérifier votre compte : <a href="${verifyUrl}">${verifyUrl}</a></p>`);
+  res.json({ message: 'Lien de vérification envoyé.' });
 });
 
 // Déconnexion (révoque le token)

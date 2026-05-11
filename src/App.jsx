@@ -6,7 +6,8 @@ import {
   AlertTriangle, Info, X, Download, Send,
   TrendingUp, TrendingDown, BarChart2, Radio, Star, Wifi,
   ChevronLeft, ChevronRight, Copy, Ban, Eye, EyeOff,
-  Activity, Banknote, Target, Layers, Phone, Monitor, ShieldCheck
+  Activity, Banknote, Target, Layers, Phone, Monitor, ShieldCheck,
+  Camera, QrCode, UserCheck, Shield
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import PrintService from './services/PrintService.js';
@@ -306,6 +307,114 @@ function HourlyHeatmap({ hourly }) {
   );
 }
 
+// === WAVE QR SCANNER ===
+function WaveQRScanner({ onScan, onClose }) {
+  const videoRef = React.useRef(null);
+  const [status, setStatus] = React.useState('loading');
+  const [errorMsg, setErrorMsg] = React.useState('');
+  const streamRef = React.useRef(null);
+
+  React.useEffect(() => {
+    let raf = null;
+    const start = async () => {
+      if (!navigator.mediaDevices?.getUserMedia) { setStatus('manual'); return; }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } }
+        });
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.onloadedmetadata = () => {
+            videoRef.current.play();
+            setStatus('scanning');
+            if ('BarcodeDetector' in window) {
+              const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+              const scan = async () => {
+                if (!videoRef.current) return;
+                try {
+                  const codes = await detector.detect(videoRef.current);
+                  if (codes.length > 0) { parse(codes[0].rawValue); return; }
+                } catch {}
+                raf = requestAnimationFrame(scan);
+              };
+              raf = requestAnimationFrame(scan);
+            } else {
+              setStatus('manual');
+              setErrorMsg('Scan automatique non disponible sur ce navigateur.');
+            }
+          };
+        }
+      } catch (e) {
+        setStatus('error');
+        setErrorMsg('Caméra inaccessible. Entrez le numéro manuellement.');
+      }
+    };
+    start();
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      streamRef.current?.getTracks().forEach(t => t.stop());
+    };
+  }, []);
+
+  const parse = (data) => {
+    const patterns = [
+      /to[=:]([+\d\s-]{8,})/i, /phone[=:]([+\d\s-]{8,})/i,
+      /(\+?225\s*[\d\s]{8,12})/, /([0-9]{8,10})/,
+    ];
+    let phone = '', amount = '';
+    for (const p of patterns) {
+      const m = data.match(p);
+      if (m) { phone = m[1].replace(/[\s-]/g, ''); break; }
+    }
+    const am = data.match(/amount[=:](\d+)/i);
+    if (am) amount = am[1];
+    if (phone) { onScan({ phone, amount }); }
+    else { setStatus('error'); setErrorMsg(`QR lu mais numéro non détecté. Données: ${data.slice(0, 50)}`); }
+  };
+
+  return (
+    <div className="modal-overlay" style={{ alignItems: 'flex-end', padding: 0 }}>
+      <div className="qr-scanner-modal">
+        <div className="qr-scanner-header">
+          <div className="qr-wave-badge">
+            <img src="/logos/wave.svg" alt="Wave" style={{ width: 24, height: 24 }}/>
+            Scanner QR Wave
+          </div>
+          <button className="qr-close-btn" onClick={onClose}><X size={18}/></button>
+        </div>
+
+        {status === 'scanning' && (
+          <div className="qr-video-wrap">
+            <video ref={videoRef} autoPlay playsInline muted className="qr-video"/>
+            <div className="qr-overlay">
+              <div className="qr-frame"/>
+              <p>Pointez vers le QR code Wave du client</p>
+            </div>
+          </div>
+        )}
+        {status === 'loading' && (
+          <div className="qr-loading">
+            <RefreshCw size={28} style={{ animation: 'spin 1s linear infinite' }}/>
+            <p>Activation de la caméra...</p>
+          </div>
+        )}
+        {(status === 'error' || status === 'manual') && (
+          <div className="qr-error-state">
+            {errorMsg && <p className="qr-error-msg">{errorMsg}</p>}
+            <p style={{ marginTop: 6, color: 'var(--text-muted)', fontSize: 13 }}>
+              Fermez et entrez le numéro Wave manuellement.
+            </p>
+          </div>
+        )}
+        <button className="btn-secondary" onClick={onClose} style={{ width: '100%', marginTop: 14 }}>
+          Fermer le scanner
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // === LOGIN SCREEN ===
 function LoginScreen({ onLogin }) {
   const [email, setEmail]         = useState('');
@@ -516,8 +625,22 @@ function App() {
     setAuthAgent(null);
   };
 
-  // Validate token on mount
+  // Validate token on mount + handle URL params
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    // Lien de vérification email depuis l'email de bienvenue
+    const verifyEmailToken = params.get('verify_email');
+    if (verifyEmailToken) {
+      fetch(`/api/auth/verify-email?token=${verifyEmailToken}`)
+        .then(r => { if (r.redirected) window.location.href = r.url; })
+        .catch(() => {});
+      return;
+    }
+    if (params.get('verified') === '1') {
+      window.history.replaceState({}, '', '/');
+      addToast('success', 'Email vérifié !', 'Votre compte est maintenant actif et sécurisé.');
+    }
+
     const token = getToken();
     if (!token) { setAuthChecked(true); return; }
     fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })
@@ -584,6 +707,7 @@ function App() {
   const [rechargeMsg, setRechargeMsg]         = useState('');
   const [genInvoiceMsg, setGenInvoiceMsg]     = useState('');
   const [webhookDebug, setWebhookDebug]       = useState(null);
+  const [showWaveQR, setShowWaveQR]           = useState(false);
 
   // Change password (for all users)
   const [changePwdCurrent, setChangePwdCurrent]   = useState('');
@@ -1289,8 +1413,31 @@ function App() {
       ? (gpStatus.mode === 'live' ? 'Live' : 'Sandbox')
       : gpStatus.hasKeys ? 'Simulateur' : 'Hors ligne';
 
+    // Banner KYC si email non vérifié
+    const kycVerified = authAgent?.emailVerified !== false; // true par défaut si undefined
+
     return (
     <>
+      {/* ── BANNER KYC — email non vérifié ── */}
+      {!kycVerified && (
+        <div className="kyc-banner animate-in">
+          <div className="kyc-banner-icon"><Shield size={18}/></div>
+          <div className="kyc-banner-text">
+            <strong>Vérifiez votre email pour sécuriser votre compte</strong>
+            <span>Un lien a été envoyé à {authAgent?.email}. Cliquez dessus pour activer.</span>
+          </div>
+          <button className="kyc-banner-btn" onClick={async () => {
+            try {
+              const res = await apiFetch('/auth/resend-verify', { method: 'POST' });
+              const d = await res.json();
+              addToast('success', 'Email envoyé', d.message);
+            } catch { addToast('error', 'Erreur', 'Impossible d\'envoyer le lien.'); }
+          }}>
+            Renvoyer
+          </button>
+        </div>
+      )}
+
       {/* ── PREMIUM DASHBOARD HEADER ── */}
       <div className="dashboard-header animate-in">
         <div className="header-left">
@@ -1501,7 +1648,14 @@ function App() {
               )}
 
               <div className="form-group">
-                <label>{OP_CONFIG[activeOperation].phoneLabel}</label>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <label style={{ margin: 0 }}>{OP_CONFIG[activeOperation].phoneLabel}</label>
+                  {selectedProvider === 'wave' && (
+                    <button type="button" className="qr-scan-trigger-btn" onClick={() => setShowWaveQR(true)}>
+                      <QrCode size={14}/> Scanner QR Wave
+                    </button>
+                  )}
+                </div>
                 <div className="phone-field-row">
                   <input
                     type="tel"
@@ -1914,7 +2068,7 @@ function App() {
           </div>
         </div>
 
-        {/* Seuil d'alerte solde bas */}
+        {/* Seuil d'alerte solde bas — simplifié, sans référence technique */}
         <div className="card settings-panel">
           <div className="card-header"><AlertTriangle size={16} style={{marginRight:'8px',verticalAlign:'middle'}}/>Alerte solde bas</div>
           <div className="card-body">
@@ -1931,12 +2085,12 @@ function App() {
             {alertThresholdMsg && <p style={{marginTop:'10px', fontSize:'13px', color: alertThresholdMsg.startsWith('✅') ? 'var(--accent-green)' : 'var(--accent-red)'}}>{alertThresholdMsg}</p>}
             <p style={{fontSize:'12px', color:'var(--text-muted)', marginTop:'8px'}}>
               Seuil actuel : <strong>{new Intl.NumberFormat('fr-FR').format(alertThreshold)} FCFA</strong>
-              {' '}— Nécessite <code>RESEND_API_KEY</code> configuré sur Render.
             </p>
           </div>
         </div>
 
-        {/* Statut GeniusPay — visible par tous */}
+        {/* Statut GeniusPay — admin seulement */}
+        {authAgent?.role === 'admin' && (
         <div className="card settings-panel" style={{gridColumn: '1 / -1'}}>
           <div className="card-header">
             <Radio size={18} style={{marginRight: '8px', verticalAlign: 'middle'}}/>
@@ -1944,18 +2098,18 @@ function App() {
           </div>
           <div className="card-body" style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '16px'}}>
             {[
-              { label: 'Connexion', value: gpStatus.connected ? '✅' : '❌', color: gpStatus.connected ? 'var(--accent-green)' : 'var(--accent-red)', size: '18px' },
-              { label: 'Mode', value: gpStatus.mode === 'sandbox' ? '🧪 Sandbox' : '🔴 Live', size: '14px' },
-              { label: 'Clés API', value: gpStatus.hasKeys ? '✅' : '❌', color: gpStatus.hasKeys ? 'var(--accent-green)' : 'var(--accent-red)', size: '18px' },
-              { label: 'Wallet', value: gpStatus.walletId || 'Auto', size: '12px' },
+              { label: 'Connexion', value: gpStatus.connected ? '✅ Connecté' : '❌ Hors ligne', color: gpStatus.connected ? 'var(--accent-green)' : 'var(--accent-red)' },
+              { label: 'Mode', value: gpStatus.mode === 'sandbox' ? '🧪 Sandbox' : '🔴 Live' },
+              { label: 'Clés API', value: gpStatus.hasKeys ? '✅ Valides' : '❌ Manquantes', color: gpStatus.hasKeys ? 'var(--accent-green)' : 'var(--accent-red)' },
             ].map((item, i) => (
-              <div key={i} style={{flexDirection: 'column', alignItems: 'center', textAlign: 'center', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '16px', display:'flex'}}>
-                <span style={{fontSize:'12px', color:'var(--text-muted)'}}>{item.label}</span>
-                <strong style={{color: item.color || 'var(--text-dark)', fontSize: item.size, marginTop: '8px'}}>{item.value}</strong>
+              <div key={i} style={{border: '1px solid var(--border-color)', borderRadius: '12px', padding: '14px', textAlign: 'center'}}>
+                <div style={{fontSize:'12px', color:'var(--text-muted)', marginBottom:'6px'}}>{item.label}</div>
+                <div style={{fontWeight: 700, color: item.color || 'var(--text-dark)', fontSize: '14px'}}>{item.value}</div>
               </div>
             ))}
           </div>
         </div>
+        )}
 
         {/* Kiosk Mode Panel */}
         <div className="card settings-panel" style={{gridColumn: '1 / -1'}}>
@@ -2758,7 +2912,11 @@ function App() {
                 <Menu size={18}/>
               </button>
               {!sidebarCollapsed && (
-                <div className="logo-area desktop-logo">
+                <div className="logo-area desktop-logo"
+                  onClick={() => setActiveTab('dashboard')}
+                  title="Tableau de bord"
+                  style={{ cursor: 'pointer', userSelect: 'none' }}
+                >
                   <div className="logo-icon">
                     <Zap size={22} color="white" fill="white" />
                   </div>
@@ -3069,6 +3227,19 @@ function App() {
                 </div>
               </div>
             </div>
+          )}
+
+          {/* Wave QR Scanner */}
+          {showWaveQR && (
+            <WaveQRScanner
+              onScan={({ phone: p, amount: a }) => {
+                if (p) setPhone(formatPhoneDisplay(p.replace(/\D/g, '').slice(-10)));
+                if (a) setAmount(a);
+                setShowWaveQR(false);
+                addToast('success', 'QR Wave scanné', `Numéro pré-rempli${a ? ` — ${new Intl.NumberFormat('fr-FR').format(a)} FCFA` : ''}`);
+              }}
+              onClose={() => setShowWaveQR(false)}
+            />
           )}
 
           {/* Toast Notifications */}

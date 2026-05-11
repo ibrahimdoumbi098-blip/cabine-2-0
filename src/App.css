@@ -940,13 +940,16 @@ input, select, textarea {
     min-height: 36px;
   }
 
-  /* ── Submit button — grand + sticky ── */
+  /* ── Submit button — grand ── */
   .submit-btn {
     min-height: 62px;
     font-size: 17px;
     border-radius: 20px;
     font-weight: 700;
     padding: 16px;
+  }
+  /* Sticky uniquement dans le formulaire de transaction (pas les settings) */
+  .working-area .submit-btn {
     position: sticky;
     bottom: calc(var(--bnav-height, 68px) + 8px);
     z-index: 20;
@@ -1626,3 +1629,205 @@ html.kiosk .kiosk-exit-btn:active { opacity: 1; }
   gap: 3px;
 }
 .tx-ref-copy:hover { color: var(--accent-primary); }
+
+/* ========================================
+   KPI CARDS — format compact sur mobile
+   ======================================== */
+@media (max-width: 768px) {
+  .dash-ops-wrap .analytics-grid {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+  }
+  .dash-ops-wrap .analytics-card {
+    padding: 10px 8px;
+    gap: 6px;
+    border-radius: 14px;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+  .dash-ops-wrap .analytics-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    flex-shrink: 0;
+  }
+  .dash-ops-wrap .analytics-content h3 {
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    margin-bottom: 2px;
+  }
+  .dash-ops-wrap .analytics-content p {
+    font-size: 9px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+  .dash-ops-wrap .analytics-trend { display: none; }
+}
+
+@media (max-width: 400px) {
+  .dash-ops-wrap .analytics-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* ========================================
+   WAVE QR SCANNER
+   ======================================== */
+.qr-scanner-modal {
+  background: var(--bg-white);
+  border-radius: 24px 24px 0 0;
+  width: 100%;
+  max-width: 480px;
+  padding: 20px 20px calc(20px + var(--safe-bottom, 0px));
+  animation: slideUp 0.3s var(--transition-smooth) forwards;
+}
+.qr-scanner-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.qr-wave-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--wave-brand);
+}
+.qr-close-btn {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: var(--bg-main);
+  border: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.qr-video-wrap {
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+  aspect-ratio: 1;
+  background: #000;
+  margin-bottom: 16px;
+}
+.qr-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.qr-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  pointer-events: none;
+}
+.qr-frame {
+  width: 200px;
+  height: 200px;
+  border: 3px solid #fff;
+  border-radius: 16px;
+  box-shadow: 0 0 0 9999px rgba(0,0,0,0.55);
+}
+.qr-overlay p {
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  background: rgba(0,0,0,0.5);
+  padding: 6px 14px;
+  border-radius: 20px;
+}
+.qr-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+.qr-error-state {
+  background: rgba(245,158,11,0.06);
+  border: 1px solid rgba(245,158,11,0.2);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+.qr-error-msg {
+  color: var(--accent-yellow);
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.qr-scan-trigger-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: rgba(27,164,230,0.08);
+  border: 1.5px solid rgba(27,164,230,0.3);
+  color: var(--wave-brand);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.qr-scan-trigger-btn:hover {
+  background: rgba(27,164,230,0.15);
+  border-color: var(--wave-brand);
+  transform: translateY(-1px);
+}
+
+/* ========================================
+   KYC VERIFICATION BANNER
+   ======================================== */
+.kyc-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: linear-gradient(135deg, rgba(245,158,11,0.1), rgba(234,179,8,0.06));
+  border: 1px solid rgba(245,158,11,0.3);
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  animation: slideUp 0.4s ease forwards;
+}
+.kyc-banner-icon {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: rgba(245,158,11,0.15);
+  display: flex; align-items: center; justify-content: center;
+  color: #b45309;
+  flex-shrink: 0;
+}
+.kyc-banner-text { flex: 1; }
+.kyc-banner-text strong { display: block; color: #b45309; font-weight: 700; margin-bottom: 2px; }
+.kyc-banner-text span { color: var(--text-secondary); }
+.kyc-banner-btn {
+  padding: 7px 14px;
+  border-radius: 8px;
+  background: #b45309;
+  color: white;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  border: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+.kyc-banner-btn:hover { background: #92400e; }
