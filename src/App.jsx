@@ -1340,7 +1340,10 @@ function App() {
         </div>
       </div>
 
-      {/* ── 4 CARTES STATUT — chacune unique ── */}
+      {/* ── OPÉRATIONS + KPI — mobile: actions en premier, desktop: KPI en premier ── */}
+      <div className="dash-ops-wrap">
+
+      {/* ── 4 CARTES STATUT ── */}
       {(() => {
         const pendingCount = transactions.filter(t => t.status === 'PENDING' || t.status === 'PROCESSING').length;
         const failedCount  = transactions.filter(t => t.status === 'FAILED').length;
@@ -1411,10 +1414,10 @@ function App() {
 
       <div className="action-nav animate-in" style={{animationDelay: '0.05s'}}>
         {[
-          { id: 'transfer', icon: <ArrowUpRight size={20}/>, label: 'Transfert' },
-          { id: 'withdraw', icon: <ArrowDownToLine size={20}/>, label: 'Retrait' },
-          { id: 'airtime',  icon: <PhoneCall size={20}/>, label: 'Crédit' },
-          { id: 'internet', icon: <Wifi size={20}/>, label: 'Internet' },
+          { id: 'transfer', icon: <ArrowUpRight size={22}/>, label: 'Transfert' },
+          { id: 'withdraw', icon: <ArrowDownToLine size={22}/>, label: 'Retrait' },
+          { id: 'airtime',  icon: <PhoneCall size={22}/>, label: 'Crédit' },
+          { id: 'internet', icon: <Wifi size={22}/>, label: 'Internet' },
         ].map(tab => {
           const isActive = tab.id === activeOperation;
           const cfg = OP_CONFIG[tab.id];
@@ -1437,6 +1440,8 @@ function App() {
           );
         })}
       </div>
+
+      </div>{/* end dash-ops-wrap */}
 
       <div className="working-area animate-in" style={{animationDelay: '0.1s'}}>
         {/* Operation Panel */}
