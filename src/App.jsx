@@ -5,9 +5,9 @@ import {
   XCircle, RefreshCw, Menu, Delete, Printer, Share2, Lock,
   AlertTriangle, Info, X, Download, Send,
   TrendingUp, TrendingDown, BarChart2, Radio, Star, Wifi,
-  ChevronLeft, ChevronRight, Copy, Ban, Eye, EyeOff,
+  Copy, Eye, EyeOff, Bookmark,
   Activity, Banknote, Target, Layers, Phone, Monitor, ShieldCheck,
-  Camera, QrCode, UserCheck, Shield
+  Camera, QrCode, UserCheck, Shield, RotateCcw, MessageSquare
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import PrintService from './services/PrintService.js';
@@ -27,12 +27,18 @@ const OPERATOR_NAMES = { orange: 'Orange', mtn: 'MTN', wave: 'Wave', moov: 'Moov
 const OPERATOR_COLORS = { orange: '#ff6600', mtn: '#ffcc00', wave: '#1ba4e6', moov: '#F37021' };
 
 // === OPERATORS SUPPORTING EACH SERVICE ===
-// Wave is app-only — no airtime recharge or data bundle via agents
+// Wave: l'API Wave ne permet pas les payouts agents tiers —
+//   transfert/retrait passent via GeniusPay (si activé côté GP)
+//   airtime/internet : Wave est app-only, pas de recharge via agent
 const OPERATOR_CAPS = {
   transfer: ['orange', 'mtn', 'wave', 'moov'],
   withdraw: ['orange', 'mtn', 'wave', 'moov'],
   airtime:  ['orange', 'mtn', 'moov'],
   internet: ['orange', 'mtn', 'moov'],
+};
+// Opérateurs avec note d'avertissement
+const OPERATOR_NOTES = {
+  wave: 'Transfert Wave via GeniusPay — vérifiez la disponibilité du service.',
 };
 
 // === FORFAITS — chargés depuis /api/bundles au démarrage (source: server.js)
@@ -303,6 +309,89 @@ function HourlyHeatmap({ hourly }) {
           <span className="hour-label">{c.hour}h</span>
         </div>
       ))}
+    </div>
+  );
+}
+
+// === ERROR BOUNDARY ===
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { hasError: false, error: null }; }
+  static getDerivedStateFromError(error) { return { hasError: true, error }; }
+  componentDidCatch(error, info) { console.error('[Cabine 2.0] Erreur app:', error, info); }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-main)', padding: '24px' }}>
+          <div style={{ textAlign: 'center', maxWidth: '380px' }}>
+            <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'rgba(239,68,68,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px', color: '#ef4444' }}>
+              <AlertTriangle size={32}/>
+            </div>
+            <h2 style={{ fontSize: '20px', fontWeight: 800, color: 'var(--text-dark)', marginBottom: '8px' }}>Une erreur inattendue</h2>
+            <p style={{ fontSize: '14px', color: 'var(--text-muted)', marginBottom: '24px' }}>
+              {this.state.error?.message || 'L\'application a rencontré une erreur. Vos données sont en sécurité.'}
+            </p>
+            <button
+              className="btn-primary"
+              onClick={() => { this.setState({ hasError: false, error: null }); window.location.reload(); }}
+              style={{ width: '100%' }}
+            >
+              <RefreshCw size={16}/> Recharger l'application
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// === SKELETON LOADERS ===
+function SkeletonLine({ width = '100%', height = '14px', radius = '6px', style = {} }) {
+  return <div className="skeleton-pulse" style={{ width, height, borderRadius: radius, ...style }} />;
+}
+
+function SkeletonCard() {
+  return (
+    <div style={{ background: 'var(--bg-white)', borderRadius: '20px', padding: '18px 20px', border: '1px solid var(--border-color)' }}>
+      <SkeletonLine width="40%" height="12px" style={{ marginBottom: '12px' }} />
+      <SkeletonLine width="60%" height="28px" style={{ marginBottom: '8px' }} />
+      <SkeletonLine width="30%" height="10px" />
+    </div>
+  );
+}
+
+function SkeletonTransactionList() {
+  return (
+    <div>
+      {[1,2,3,4,5].map(i => (
+        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '14px 0', borderBottom: '1px solid var(--bg-main)' }}>
+          <div className="skeleton-pulse" style={{ width: 40, height: 40, borderRadius: '10px', flexShrink: 0 }} />
+          <div style={{ flex: 1 }}>
+            <SkeletonLine width="55%" height="13px" style={{ marginBottom: '8px' }} />
+            <SkeletonLine width="40%" height="11px" />
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <SkeletonLine width="80px" height="15px" style={{ marginBottom: '6px' }} />
+            <SkeletonLine width="60px" height="10px" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// === EMPTY STATE ===
+function EmptyState({ icon, title, subtitle, action }) {
+  return (
+    <div className="empty-state">
+      <div className="empty-state-icon">{icon}</div>
+      <h3 className="empty-state-title">{title}</h3>
+      {subtitle && <p className="empty-state-sub">{subtitle}</p>}
+      {action && (
+        <button className="btn-primary" onClick={action.fn} style={{ minWidth: '160px', marginTop: '8px' }}>
+          {action.label}
+        </button>
+      )}
     </div>
   );
 }
@@ -1395,6 +1484,8 @@ function App() {
         return <div className="tx-status pending"><Clock size={10} style={{marginRight: '4px', verticalAlign: 'middle'}}/> En cours</div>;
       case 'FAILED':
         return <div className="tx-status" style={{background: 'rgba(239, 68, 68, 0.2)', color: 'var(--accent-red)'}}><XCircle size={10} style={{marginRight: '4px', verticalAlign: 'middle'}}/> Échec (Remboursé)</div>;
+      case 'REVERSED':
+        return <div className="tx-status" style={{background: 'rgba(107, 114, 128, 0.15)', color: 'var(--text-muted)'}}><RotateCcw size={10} style={{marginRight: '4px', verticalAlign: 'middle'}}/> Annulée</div>;
       default:
         return null;
     }
@@ -1627,6 +1718,13 @@ function App() {
                   })}
                 </div>
               </div>
+
+              {OPERATOR_NOTES[selectedProvider] && (
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', padding: '10px 14px', borderRadius: '10px', background: 'rgba(27,164,230,0.07)', border: '1px solid rgba(27,164,230,0.2)', marginBottom: '12px', fontSize: '12px', color: 'var(--wave-brand)', fontWeight: 500 }}>
+                  <Info size={14} style={{ flexShrink: 0, marginTop: '1px' }}/>
+                  {OPERATOR_NOTES[selectedProvider]}
+                </div>
+              )}
 
               {contacts.length > 0 && (
                 <div className="contacts-section">
@@ -1921,8 +2019,15 @@ function App() {
         </div>
         <div className="card-body tx-body" style={{maxHeight: 'none'}}>
           <div className="tx-list">
-            {transactions.length === 0 ? (
-              <p style={{color: 'var(--text-muted)', textAlign: 'center', marginTop: '40px'}}>Aucune transaction disponible.</p>
+            {isLoading && transactions.length === 0 ? (
+              <SkeletonTransactionList />
+            ) : transactions.length === 0 ? (
+              <EmptyState
+                icon={<History size={40} style={{ color: 'var(--text-muted)' }} />}
+                title="Aucune transaction"
+                subtitle="Vos transactions apparaîtront ici dès votre première opération."
+                action={{ fn: () => setActiveTab('dashboard'), label: 'Faire une transaction' }}
+              />
             ) : (
               transactions.map(tx => (
                 <div className="tx-item" key={tx.id} style={{padding: '14px 0'}}>
@@ -1962,9 +2067,25 @@ function App() {
                       {getStatusBadge(tx.status)}
                     </div>
                     {tx.status === 'SUCCESS' && (
-                       <button className="icon-btn" onClick={() => setReceiptData(tx)} title="Voir le reçu">
-                         <Printer size={16} />
-                       </button>
+                      <button className="icon-btn" onClick={() => setReceiptData(tx)} title="Voir le reçu">
+                        <Printer size={16} />
+                      </button>
+                    )}
+                    {tx.status === 'SUCCESS' && tx.type !== 'RETRAIT' && authAgent?.role === 'admin' && (
+                      <button className="icon-btn" title="Annuler cette transaction"
+                        style={{ color: 'var(--accent-red)', borderColor: 'rgba(239,68,68,0.2)' }}
+                        onClick={async () => {
+                          if (!window.confirm(`Annuler TX-${String(tx.id).padStart(6,'0')} et rembourser ${new Intl.NumberFormat('fr-FR').format(tx.amount)} FCFA ?`)) return;
+                          try {
+                            const res = await apiFetch(`/admin/reverse/${tx.id}`, { method: 'POST' });
+                            const data = await res.json();
+                            if (!res.ok) { addToast('error', 'Erreur', data.error); return; }
+                            addToast('success', 'Transaction annulée', data.message);
+                            fetchData();
+                          } catch (e) { addToast('error', 'Erreur', e.message); }
+                        }}>
+                        <RotateCcw size={14} />
+                      </button>
                     )}
                   </div>
                 </div>
@@ -2980,6 +3101,22 @@ function App() {
             </div>
           </aside>
 
+          {/* Skeleton overlay pendant chargement initial */}
+          {isLoading && (
+            <div style={{ position: 'fixed', inset: 0, background: 'var(--bg-main)', zIndex: 150, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '16px' }}>
+              <div style={{ width: 52, height: 52, borderRadius: '16px', background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'breathe 2s ease infinite' }}>
+                <Zap size={28} color="white" fill="white" />
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontWeight: 800, fontSize: '18px', color: 'var(--text-dark)', marginBottom: '4px' }}>Cabine 2.0</div>
+                <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Chargement en cours...</div>
+              </div>
+              <div style={{ width: '120px', height: '3px', borderRadius: '2px', background: 'var(--border-color)', overflow: 'hidden', marginTop: '8px' }}>
+                <div style={{ height: '100%', background: 'linear-gradient(90deg, #6366f1, #8b5cf6)', borderRadius: '2px', animation: 'loading-bar 1.5s ease-in-out infinite' }} />
+              </div>
+            </div>
+          )}
+
           {/* Connecting banner — soft yellow, shown 2-7 failures */}
           {!isOffline && !isLoading && offlineCount.current >= 2 && (
             <div className="connecting-banner">
@@ -3372,4 +3509,12 @@ function App() {
   );
 }
 
-export default App;
+function AppWithBoundary() {
+  return (
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
+  );
+}
+
+export default AppWithBoundary;

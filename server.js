@@ -795,8 +795,12 @@ async function pollPayoutStatus(reference, txId, maxAttempts = 10) {
 // ==========================================
 // EMAIL SERVICE (Resend) — optionnel, activer via RESEND_API_KEY
 // ==========================================
-const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
-const FROM_EMAIL = process.env.FROM_EMAIL || 'Cabine 2.0 <noreply@cabine.ci>';
+const RESEND_API_KEY   = process.env.RESEND_API_KEY   || '';
+const FROM_EMAIL       = process.env.FROM_EMAIL       || 'Cabine 2.0 <noreply@cabine.ci>';
+const AT_API_KEY       = process.env.AT_API_KEY       || ''; // Africa's Talking SMS
+const AT_USERNAME      = process.env.AT_USERNAME      || 'sandbox';
+const AT_SENDER        = process.env.AT_SENDER        || 'CABINE';
+const AT_SHORTCODE     = process.env.AT_SHORTCODE     || '';
 
 async function sendEmail(to, subject, html) {
   if (!RESEND_API_KEY) return; // désactivé si clé non configurée
@@ -856,6 +860,36 @@ function agentWelcomeHtml(name, email, password, verifyUrl = null) {
   </div>
 </body>
 </html>`;
+}
+
+// ==========================================
+// SMS SERVICE — Africa's Talking
+// ==========================================
+async function sendSMS(to, message) {
+  if (!AT_API_KEY || AT_API_KEY === '') return;
+  const phone = to.startsWith('+') ? to : (to.startsWith('225') ? '+' + to : '+225' + to.replace(/\D/g, ''));
+  try {
+    const body = new URLSearchParams({ username: AT_USERNAME, to: phone, message });
+    if (AT_SHORTCODE) body.append('from', AT_SHORTCODE);
+    const res = await fetch('https://api.africastalking.com/version1/messaging', {
+      method: 'POST',
+      headers: { apiKey: AT_API_KEY, Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+    });
+    const data = await res.json();
+    log('INFO', 'SMS envoyé', { to: phone, status: data?.SMSMessageData?.Recipients?.[0]?.status });
+  } catch (e) { log('WARN', 'SMS échoué', { to, error: e.message }); }
+}
+
+function smsConfirmationClient(type, amount, phone, ref) {
+  const fmtAmt = new Intl.NumberFormat('fr-FR').format(amount);
+  const msgs = {
+    TRANSFER: `Cabine 2.0: Vous avez reçu ${fmtAmt} FCFA. Ref: ${ref}. Votre agent vous a effectué ce transfert.`,
+    RETRAIT:  `Cabine 2.0: Votre retrait de ${fmtAmt} FCFA a été pris en charge. Ref: ${ref}.`,
+    AIRTIME:  `Cabine 2.0: Votre crédit de ${fmtAmt} FCFA a été rechargé avec succès. Ref: ${ref}.`,
+    INTERNET: `Cabine 2.0: Votre forfait internet a été activé. Ref: ${ref}.`,
+  };
+  return msgs[type] || `Cabine 2.0: Transaction ${fmtAmt} FCFA confirmée. Ref: ${ref}.`;
 }
 
 function resetPasswordHtml(name, resetUrl) {
@@ -1788,9 +1822,13 @@ app.post('/api/webhooks/geniuspay', async (req, res) => {
     if (isSuccess) {
       await queryRunUpdate('UPDATE transactions SET status = ?, geniuspay_ref = ? WHERE id = ?',
         ['SUCCESS', ref, cabineTxId]);
-      const tx = await queryGet('SELECT wallet_id FROM transactions WHERE id = ?', [cabineTxId]);
+      const tx = await queryGet('SELECT wallet_id, type, amount, phone FROM transactions WHERE id = ?', [cabineTxId]);
       log('INFO', `[WEBHOOK] TX ${cabineTxId} → SUCCESS`, { ref, event });
-      if (tx) notifyWallet(tx.wallet_id, 'tx_update', { txId: parseInt(cabineTxId), status: 'SUCCESS', ref });
+      if (tx) {
+        notifyWallet(tx.wallet_id, 'tx_update', { txId: parseInt(cabineTxId), status: 'SUCCESS', ref });
+        // SMS de confirmation au client
+        sendSMS(tx.phone, smsConfirmationClient(tx.type, tx.amount, tx.phone, `TX-${String(cabineTxId).padStart(6,'0')}`)).catch(() => {});
+      }
     } else if (isFailed) {
       await queryRunUpdate('UPDATE transactions SET status = ? WHERE id = ?', ['FAILED', cabineTxId]);
       const tx = await queryGet('SELECT wallet_id, amount FROM transactions WHERE id = ?', [cabineTxId]);
@@ -1881,6 +1919,84 @@ app.get('/api/analytics', authMiddleware, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ==========================================
+// TRANSACTION REVERSAL (admin)
+// ==========================================
+app.post('/api/admin/reverse/:txId', authMiddleware, async (req, res) => {
+  if (req.agent.role !== 'admin') return res.status(403).json({ error: 'Admin requis.' });
+  try {
+    const tx = await queryGet('SELECT * FROM transactions WHERE id = ?', [req.params.txId]);
+    if (!tx) return res.status(404).json({ error: 'Transaction introuvable.' });
+    if (tx.status !== 'SUCCESS') return res.status(400).json({ error: 'Seules les transactions SUCCESS peuvent être annulées.' });
+    if (tx.type === 'RETRAIT') return res.status(400).json({ error: 'Un retrait ne peut pas être annulé.' });
+    // Rembourser le wallet
+    await queryRunUpdate('UPDATE wallets SET balance = balance + ? WHERE id = ?', [tx.amount, tx.wallet_id]);
+    await queryRunUpdate(
+      `UPDATE transactions SET status = 'REVERSED' WHERE id = ?`, [tx.id]
+    );
+    await queryRunInsert(
+      'INSERT INTO balance_ledger (wallet_id, amount, type, description, done_by) VALUES (?, ?, ?, ?, ?)',
+      [tx.wallet_id, tx.amount, 'REVERSAL', `Annulation TX-${String(tx.id).padStart(6,'0')}`, req.agent.agentId]
+    );
+    const wallet = await queryGet('SELECT balance FROM wallets WHERE id = ?', [tx.wallet_id]);
+    notifyWallet(tx.wallet_id, 'tx_update', { txId: tx.id, status: 'REVERSED', balance: wallet?.balance });
+    log('INFO', `TX ${tx.id} annulée +${tx.amount} FCFA remboursé`, { by: req.agent.email });
+    res.json({ message: `Transaction TX-${String(tx.id).padStart(6,'0')} annulée. ${new Intl.NumberFormat('fr-FR').format(tx.amount)} FCFA remboursés.`, newBalance: wallet?.balance });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ==========================================
+// CRON — Génération auto des factures (1er du mois, minuit)
+// ==========================================
+function scheduleAutoInvoice() {
+  const check = async () => {
+    const now = new Date();
+    if (now.getDate() === 1 && now.getHours() === 0 && now.getMinutes() < 5) {
+      try {
+        const period = now.toISOString().slice(0, 7);
+        const agents = await queryAll("SELECT id, wallet_id FROM agents WHERE role = 'agent' AND active = TRUE");
+        let created = 0;
+        for (const ag of agents) {
+          const existing = await queryGet('SELECT id FROM invoices WHERE agent_id = ? AND period = ?', [ag.id, period]);
+          if (!existing) {
+            await queryRunInsert(
+              'INSERT INTO invoices (agent_id, wallet_id, period, amount, status) VALUES (?, ?, ?, ?, ?)',
+              [ag.id, ag.wallet_id, period, 10000, 'pending']
+            );
+            created++;
+          }
+        }
+        if (created > 0) log('INFO', `Auto-factures ${period}: ${created} factures créées`);
+      } catch (e) { log('ERROR', 'Auto-invoice cron failed', { error: e.message }); }
+    }
+  };
+  setInterval(check, 5 * 60 * 1000); // vérif toutes les 5 min
+}
+scheduleAutoInvoice();
+
+// ==========================================
+// CRON — Sync solde GeniusPay (toutes les 6h)
+// ==========================================
+async function autoSyncGeniusPayBalance() {
+  if (!geniusPayConnected || !discoveredWalletId) return;
+  try {
+    const data = await geniusPayRequest('GET', '/wallets');
+    const wallets = data?.data?.wallets || [];
+    if (!wallets.length) return;
+    const gpWallet = wallets.find(w => w.id === discoveredWalletId) || wallets[0];
+    const gpBalance = Math.floor(parseFloat(gpWallet.available_balance || gpWallet.balance || 0));
+    // Met à jour seulement le wallet de l'admin (wallet_id=1) si la différence est significative
+    const current = await queryGet('SELECT balance FROM wallets WHERE id = 1');
+    const diff = Math.abs((current?.balance || 0) - gpBalance);
+    if (diff > 1000) { // seulement si diff > 1000 FCFA pour éviter les faux sync
+      log('INFO', `Auto-sync GeniusPay: ${current?.balance} → ${gpBalance} FCFA (diff: ${diff})`);
+      // Notifier l'admin mais ne pas changer automatiquement — juste alerter
+      notifyAll('balance_drift', { localBalance: current?.balance, gpBalance, diff });
+    }
+  } catch {}
+}
+setInterval(autoSyncGeniusPayBalance, 6 * 60 * 60 * 1000); // toutes les 6h
 
 // Serve static files
 app.use(express.static(join(__dirname, 'dist')));
