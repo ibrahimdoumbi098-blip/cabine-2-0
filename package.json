@@ -14,7 +14,10 @@
     "cap:build": "npm run build && npx cap sync android",
     "cap:android": "npx cap open android",
     "cap:run": "npm run build && npx cap sync android && npx cap run android",
-    "cap:init": "npx cap add android"
+    "cap:init": "npx cap add android",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@capacitor/android": "^7.2.0",
@@ -31,12 +34,12 @@
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "html2canvas": "^1.4.1",
+    "jsonwebtoken": "^9.0.2",
     "lucide-react": "^1.11.0",
     "pg": "^8.20.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "sqlite3": "^6.0.1",
-    "jsonwebtoken": "^9.0.2",
     "uuid": "^14.0.0"
   },
   "devDependencies": {
@@ -51,6 +54,7 @@
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.5.0",
     "typescript": "^6.0.3",
-    "vite": "^8.0.10"
+    "vite": "^8.0.10",
+    "vitest": "^3.2.4"
   }
 }

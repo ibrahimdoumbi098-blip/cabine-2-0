@@ -12,6 +12,7 @@ import {
 import html2canvas from 'html2canvas';
 import PrintService from './services/PrintService.js';
 import KioskService from './services/KioskService.js';
+import { downloadPDFReport } from './utils/pdfReport.js';
 import './App.css';
 
 const API_URL = '/api';
@@ -185,7 +186,7 @@ function detectOperator(phone) {
   const cleaned = phone.replace(/[\s\-\.\+]/g, '');
   let digits = cleaned;
   if (digits.startsWith('225')) digits = digits.substring(3);
-  if (digits.startsWith('0')) digits = digits.substring(1);
+  // Conserver le 0 — les préfixes CI sont 07, 08, 27, 05, 06, 01-03
   if (digits.length < 2) return null;
   const prefix = digits.substring(0, 2);
   // Orange CI: 07, 08, 27
@@ -532,6 +533,12 @@ function LoginScreen({ onLogin }) {
     if (urlToken && urlEmail) setMode('reset');
   }, []);
 
+  const [show2FA, setShow2FA]       = useState(false);
+  const [otpEmail, setOtpEmail]     = useState('');
+  const [otp, setOtp]               = useState('');
+  const [otpError, setOtpError]     = useState('');
+  const [otpLoading, setOtpLoading] = useState(false);
+
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoading(true); setError('');
@@ -543,11 +550,32 @@ function LoginScreen({ onLogin }) {
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error || 'Connexion échouée.'); return; }
+      if (data.requires_2fa) {
+        setOtpEmail(data.email); setShow2FA(true); setOtp(''); setOtpError('');
+        return;
+      }
       localStorage.setItem('cabine_token', data.token);
       onLogin(data.agent);
     } catch {
       setError('Impossible de joindre le serveur. Vérifiez votre connexion.');
     } finally { setLoading(false); }
+  };
+
+  const handleVerify2FA = async (e) => {
+    e.preventDefault();
+    setOtpLoading(true); setOtpError('');
+    try {
+      const res = await fetch('/api/auth/verify-2fa', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: otpEmail, otp: otp.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setOtpError(data.error || 'Code incorrect.'); return; }
+      localStorage.setItem('cabine_token', data.token);
+      onLogin(data.agent);
+    } catch { setOtpError('Erreur réseau.'); }
+    finally { setOtpLoading(false); }
   };
 
   const handleForgot = async (e) => {
@@ -601,6 +629,47 @@ function LoginScreen({ onLogin }) {
       </div>
       <h1 style={{fontSize: '24px', fontWeight: 800, color: 'var(--text-dark)', marginBottom: '4px'}}>Cabine 2.0</h1>
       <p style={{color: 'var(--text-secondary)', fontSize: '14px'}}>Plateforme Fintech — Côte d'Ivoire</p>
+    </div>
+  );
+
+  if (show2FA) return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-main)', padding: '20px' }}>
+      <div style={card}>
+        <div style={{ textAlign: 'center', marginBottom: '28px' }}>
+          <div style={{ width: 56, height: 56, borderRadius: '16px', background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px', boxShadow: '0 8px 24px rgba(99,102,241,.35)' }}>
+            <Shield size={26} fill="white" color="white" />
+          </div>
+          <h1 style={{ fontSize: '22px', fontWeight: 800, color: 'var(--text-dark)', marginBottom: '6px' }}>Vérification admin</h1>
+          <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Code de sécurité envoyé à</p>
+          <p style={{ color: 'var(--accent-primary)', fontSize: '14px', fontWeight: 600, marginTop: '2px' }}>{otpEmail}</p>
+        </div>
+        <form onSubmit={handleVerify2FA}>
+          <div className="form-group" style={{ marginBottom: '20px' }}>
+            <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px', display: 'block' }}>
+              Code à 6 chiffres
+            </label>
+            <input
+              type="text" required autoFocus maxLength={6} inputMode="numeric"
+              placeholder="000000" value={otp} onChange={e => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              style={{ textAlign: 'center', fontSize: '28px', fontWeight: 800, letterSpacing: '12px' }}
+            />
+          </div>
+          {otpError && (
+            <div style={{ background: 'rgba(239,68,68,.08)', border: '1px solid rgba(239,68,68,.2)', borderRadius: '10px', padding: '12px', marginBottom: '16px', color: 'var(--accent-red)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <AlertTriangle size={14}/> {otpError}
+            </div>
+          )}
+          <button type="submit" className="submit-btn" disabled={otpLoading || otp.length !== 6} style={{ width: '100%' }}>
+            {otpLoading ? <><RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }}/> Vérification...</> : <><ShieldCheck size={16}/> Confirmer</>}
+          </button>
+        </form>
+        <p style={{ textAlign: 'center', marginTop: '16px', fontSize: '12px', color: 'var(--text-muted)' }}>
+          Valable 10 minutes. Vérifiez vos spams si non reçu.
+        </p>
+        <button onClick={() => { setShow2FA(false); setOtp(''); setOtpError(''); }} style={{ width: '100%', marginTop: '10px', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '12px' }}>
+          ← Retour à la connexion
+        </button>
+      </div>
     </div>
   );
 
@@ -1175,7 +1244,8 @@ function App() {
   }, [authAgent?.id]);
 
   const sseRef = useRef(null);
-  const [txBadge, setTxBadge] = useState(0); // badge "nouvelles tx" sur Historique
+  const [txBadge, setTxBadge]         = useState(0);
+  const [offlineQueue, setOfflineQueue] = useState(0); // nb tx en attente hors-ligne
 
   // SSE — connexion temps réel, remplace le polling 3s
   const connectSSE = useCallback(() => {
@@ -1223,6 +1293,32 @@ function App() {
     if (authAgent) connectSSE();
     return () => { sseRef.current?.close(); sseRef.current = null; };
   }, [authAgent]);
+
+  // Écouter les messages du Service Worker (offline queue)
+  useEffect(() => {
+    if (!navigator.serviceWorker) return;
+    const handler = (event) => {
+      const { data } = event;
+      if (data?.type === 'TX_QUEUED') {
+        setOfflineQueue(n => n + 1);
+        addToast('warning', '📶 Hors ligne', 'Transaction mise en file. Elle sera envoyée au retour du réseau.');
+      }
+      if (data?.type === 'TX_REPLAYED') {
+        setOfflineQueue(n => Math.max(0, n - 1));
+        addToast('success', 'Transaction envoyée', `Tx hors-ligne ID #${data.queueId} envoyée avec succès.`);
+        fetchData();
+      }
+      if (data?.type === 'QUEUE_COUNT') {
+        setOfflineQueue(data.count || 0);
+      }
+    };
+    navigator.serviceWorker.addEventListener('message', handler);
+    // Récupérer le count initial
+    navigator.serviceWorker.ready.then(reg => {
+      reg.active?.postMessage({ type: 'GET_QUEUE_COUNT' });
+    });
+    return () => navigator.serviceWorker.removeEventListener('message', handler);
+  }, []);
 
   useEffect(() => {
     fetchBundles();
@@ -2603,6 +2699,19 @@ function App() {
               Ajouter au solde
             </button>
             <button
+              className="btn-primary"
+              style={{ background: '#6366f1', fontSize: '13px' }}
+              onClick={async () => {
+                const period = new Date().toISOString().slice(0, 7);
+                const res = await apiFetch(`/transactions?limit=1000`);
+                const txs = await res.json();
+                downloadPDFReport(agentName, authAgent?.email || '', period, txs, { commissionRate: commissions?.transfer || 2 });
+              }}
+            >
+              <Download size={14} style={{ marginRight: '6px', verticalAlign: 'middle' }}/>
+              Rapport PDF du mois
+            </button>
+            <button
               className="btn-secondary"
               style={{ fontSize: '13px', color: 'var(--accent-red)' }}
               onClick={() => {
@@ -3126,8 +3235,13 @@ function App() {
 
           {/* Offline Banner — hard red, shown after 8 failures (16s+) */}
           {isOffline && (
-            <div className="offline-banner">
-              <AlertTriangle size={16} /> Serveur inaccessible — vérifiez votre réseau ou réessayez dans quelques secondes
+            <div className="offline-banner" onClick={() => {
+              navigator.serviceWorker?.ready.then(reg => reg.active?.postMessage({ type: 'REPLAY_QUEUE' }));
+            }} style={{ cursor: offlineQueue > 0 ? 'pointer' : 'default' }}>
+              <AlertTriangle size={16} />
+              {offlineQueue > 0
+                ? `📶 Hors ligne — ${offlineQueue} transaction(s) en file. Tap pour réessayer.`
+                : 'Serveur inaccessible — vérifiez votre réseau'}
             </div>
           )}
 

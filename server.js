@@ -269,10 +269,17 @@ setInterval(() => {
 const resetTokens = new Map(); // email → { token, expires }
 // Email verification tokens (KYC step 1)
 const emailVerifyTokens = new Map(); // token → { agentId, email, expires }
+// 2FA OTP tokens (admin only)
+const twoFATokens = new Map(); // email → { otp, expires, attempts }
+// Sessions actives (pour révocation + audit)
+const activeSessions = new Map(); // jwtId → { agentId, email, role, ip, createdAt, lastSeen }
 setInterval(() => {
   const now = Date.now();
   for (const [k, v] of resetTokens) if (now > v.expires) resetTokens.delete(k);
   for (const [k, v] of emailVerifyTokens) if (now > v.expires) emailVerifyTokens.delete(k);
+  for (const [k, v] of twoFATokens) if (now > v.expires) twoFATokens.delete(k);
+  const weekAgo = now - 86400000 * 7;
+  for (const [k, v] of activeSessions) if (v.lastSeen < weekAgo) activeSessions.delete(k);
 }, 3600000);
 
 // ==========================================
@@ -602,7 +609,7 @@ function formatPhoneCI(phone) {
   let cleaned = phone.replace(/[\s\-\.]/g, '');
   if (cleaned.startsWith('+225')) return cleaned;
   if (cleaned.startsWith('225')) return '+' + cleaned;
-  if (cleaned.startsWith('0')) cleaned = cleaned.substring(1);
+  // Conserver le 0 initial CI — +225 + 07XXXXXXXX = +2250700000000 (format correct)
   return '+225' + cleaned;
 }
 
@@ -970,6 +977,9 @@ function authMiddleware(req, res, next) {
   if (tokenBlacklist.has(token)) return res.status(401).json({ error: 'Session expirée. Reconnectez-vous.' });
   try {
     req.agent = jwt.verify(token, JWT_SECRET);
+    if (req.agent.jwtId && activeSessions.has(req.agent.jwtId)) {
+      activeSessions.get(req.agent.jwtId).lastSeen = Date.now();
+    }
     next();
   } catch {
     res.status(401).json({ error: 'Session expirée. Reconnectez-vous.' });
@@ -990,6 +1000,22 @@ app.post('/api/auth/login', authRateLimiter, async (req, res) => {
       JWT_SECRET,
       { expiresIn: '7d' }
     );
+    // Admin → 2FA OTP avant d'émettre le JWT
+    if (agent.role === 'admin') {
+      const otp = String(Math.floor(100000 + Math.random() * 900000));
+      twoFATokens.set(agent.email.toLowerCase(), { otp, expires: Date.now() + 600000, attempts: 0 });
+      await sendEmail(agent.email, `[Cabine 2.0] Code de sécurité : ${otp}`,
+        `<div style="font-family:sans-serif;max-width:400px;margin:40px auto;background:#fff;border-radius:16px;padding:32px;text-align:center;border:1px solid #e5e7eb"><div style="width:56px;height:56px;background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:16px;margin:0 auto 16px;display:flex;align-items:center;justify-content:center;font-size:24px">⚡</div><h2 style="color:#111827;font-size:18px;margin-bottom:8px">Vérification de connexion</h2><p style="color:#6b7280;font-size:14px;margin-bottom:24px">Code de sécurité pour votre session admin Cabine 2.0</p><div style="background:#f9fafb;border:2px solid #e5e7eb;border-radius:12px;padding:20px;margin-bottom:20px"><span style="font-size:36px;font-weight:900;letter-spacing:12px;color:#6366f1">${otp}</span></div><p style="color:#9ca3af;font-size:12px">Valable 10 minutes. Ne le partagez jamais.</p></div>`
+      ).catch(() => {});
+      log('INFO', '2FA OTP envoyé admin', { agent: agent.email });
+      return res.json({ requires_2fa: true, email: agent.email, message: 'Code de sécurité envoyé sur votre email.' });
+    }
+    const jwtId = uuidv4();
+    const token = jwt.sign(
+      { jwtId, agentId: agent.id, name: agent.name, email: agent.email, role: agent.role, walletId: agent.wallet_id },
+      JWT_SECRET, { expiresIn: '7d' }
+    );
+    activeSessions.set(jwtId, { agentId: agent.id, email: agent.email, role: agent.role, ip: req.ip, createdAt: Date.now(), lastSeen: Date.now() });
     log('INFO', 'Login réussi', { agent: agent.email, role: agent.role });
     res.json({ token, agent: { id: agent.id, name: agent.name, email: agent.email, role: agent.role, walletId: agent.wallet_id, emailVerified: !!agent.email_verified } });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1057,6 +1083,40 @@ app.put('/api/agents/:id/toggle', authMiddleware, async (req, res) => {
     await queryRunUpdate('UPDATE agents SET active = ? WHERE id = ?', [newActive, req.params.id]);
     res.json({ active: newActive });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── 2FA Vérification OTP (admin) ──
+app.post('/api/auth/verify-2fa', authRateLimiter, async (req, res) => {
+  const { email, otp } = req.body || {};
+  if (!email || !otp) return res.status(400).json({ error: 'Email et code requis.' });
+  const entry = twoFATokens.get(email.toLowerCase());
+  if (!entry || Date.now() > entry.expires) return res.status(400).json({ error: 'Code expiré. Reconnectez-vous.' });
+  entry.attempts = (entry.attempts || 0) + 1;
+  if (entry.attempts > 5) { twoFATokens.delete(email.toLowerCase()); return res.status(429).json({ error: 'Trop de tentatives. Reconnectez-vous.' }); }
+  if (entry.otp !== otp.trim()) return res.status(401).json({ error: `Code incorrect. ${5 - entry.attempts} essai(s) restant(s).` });
+  twoFATokens.delete(email.toLowerCase());
+  try {
+    const agent = await queryGet('SELECT * FROM agents WHERE email = ? AND active = TRUE', [email.toLowerCase()]);
+    if (!agent) return res.status(404).json({ error: 'Agent introuvable.' });
+    const jwtId = uuidv4();
+    const token = jwt.sign(
+      { jwtId, agentId: agent.id, name: agent.name, email: agent.email, role: agent.role, walletId: agent.wallet_id },
+      JWT_SECRET, { expiresIn: '7d' }
+    );
+    activeSessions.set(jwtId, { agentId: agent.id, email: agent.email, role: agent.role, ip: req.ip, createdAt: Date.now(), lastSeen: Date.now() });
+    log('INFO', '2FA validé — Login admin complet', { agent: agent.email });
+    res.json({ token, agent: { id: agent.id, name: agent.name, email: agent.email, role: agent.role, walletId: agent.wallet_id, emailVerified: !!agent.email_verified } });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Sessions actives (admin)
+app.get('/api/auth/sessions', authMiddleware, (req, res) => {
+  if (req.agent.role !== 'admin') return res.status(403).json({ error: 'Admin requis.' });
+  const sessions = [];
+  for (const [jwtId, s] of activeSessions) {
+    sessions.push({ jwtId: jwtId.slice(0, 8) + '...', ...s, isCurrent: req.agent.jwtId === jwtId });
+  }
+  res.json(sessions.sort((a, b) => b.lastSeen - a.lastSeen));
 });
 
 // Vérification email (KYC step 1)
@@ -1410,6 +1470,27 @@ app.put('/api/agents/:id/limits', authMiddleware, async (req, res) => {
     await queryRunUpdate('UPDATE wallets SET daily_limit = ? WHERE id = ?', [limit, agent.wallet_id]);
     res.json({ message: 'Limite journalière mise à jour.', daily_limit: limit });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Status public (uptime, santé système) ──
+app.get('/api/status', async (req, res) => {
+  const uptime = process.uptime();
+  const memMB = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
+  let dbOk = false;
+  try { await queryGet('SELECT 1 as ok'); dbOk = true; } catch {}
+  res.json({
+    status: dbOk ? 'operational' : 'degraded',
+    timestamp: new Date().toISOString(),
+    services: {
+      api: 'operational',
+      database: dbOk ? 'operational' : 'down',
+      geniuspay: geniusPayConnected ? 'operational' : 'degraded',
+    },
+    uptime: { seconds: Math.floor(uptime), human: `${Math.floor(uptime/3600)}h ${Math.floor((uptime%3600)/60)}m` },
+    memory_mb: memMB,
+    active_sessions: activeSessions.size,
+    version: '2.0.0',
+  });
 });
 
 app.get('/api/bundles', (req, res) => {
