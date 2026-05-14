@@ -246,6 +246,46 @@ const OPERATOR_BUNDLES = {
 };
 
 // ==========================================
+// CONFIGURATION CINETPAY — Collections (dépôts entrants)
+// Meilleur agrégateur CI pour recevoir Orange/MTN/Wave/Moov
+// ==========================================
+const CINETPAY_API_KEY = process.env.CINETPAY_API_KEY || '';
+const CINETPAY_SITE_ID = process.env.CINETPAY_SITE_ID || '';
+const CINETPAY_BASE    = 'https://api-checkout.cinetpay.com/v2';
+const CINETPAY_SECRET  = process.env.CINETPAY_SECRET || '';
+
+async function cinetpayCreatePayment({ amount, transactionId, description, customerName, customerEmail, customerPhone, returnUrl }) {
+  const body = {
+    apikey: CINETPAY_API_KEY,
+    site_id: CINETPAY_SITE_ID,
+    transaction_id: transactionId,
+    amount: parseInt(amount, 10),
+    currency: 'XOF',
+    notify_url: `${APP_DOMAIN}/api/webhooks/cinetpay`,
+    return_url: returnUrl || `${APP_DOMAIN}/?deposit_success=1`,
+    description: description || 'Recharge flotte Cabine 2.0',
+    customer_name: customerName || 'Agent Cabine',
+    customer_email: customerEmail || 'agent@cabine.ci',
+    customer_phone_number: customerPhone || '',
+    customer_address: 'Abidjan',
+    customer_city: 'Abidjan',
+    customer_country: 'CI',
+    channels: 'ALL', // Orange Money + MTN + Wave + Moov
+    lang: 'fr',
+  };
+  const res = await fetch(`${CINETPAY_BASE}/payment`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (data.code !== '201' && data.code !== 201) {
+    throw new Error(data.message || 'CinetPay: création paiement échouée');
+  }
+  return data.data; // { payment_url, payment_token }
+}
+
+// ==========================================
 // CONFIGURATION GENIUSPAY
 // ==========================================
 const GENIUSPAY_BASE = 'https://pay.genius.ci/api/v1/merchant';
@@ -1470,6 +1510,108 @@ app.put('/api/agents/:id/limits', authMiddleware, async (req, res) => {
     await queryRunUpdate('UPDATE wallets SET daily_limit = ? WHERE id = ?', [limit, agent.wallet_id]);
     res.json({ message: 'Limite journalière mise à jour.', daily_limit: limit });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ==========================================
+// DÉPÔTS VIA MOBILE MONEY (CinetPay Collections)
+// Admin recharge son compte directement depuis Orange/MTN/Wave/Moov
+// ==========================================
+
+// Stocker les dépôts en attente
+const pendingDeposits = new Map(); // transactionId → { agentId, walletId, amount, createdAt }
+
+// Initier un dépôt via CinetPay
+app.post('/api/wallet/topup/init', authMiddleware, async (req, res) => {
+  if (req.agent.role !== 'admin') return res.status(403).json({ error: 'Admin requis.' });
+  const { amount, phone } = req.body;
+  const numAmount = parseInt(amount, 10);
+  if (!numAmount || numAmount < 500) return res.status(400).json({ error: 'Montant minimum : 500 FCFA.' });
+  if (!CINETPAY_API_KEY || !CINETPAY_SITE_ID) {
+    return res.status(503).json({
+      error: 'CinetPay non configuré.',
+      setup: 'Ajoutez CINETPAY_API_KEY et CINETPAY_SITE_ID dans les variables Render.',
+    });
+  }
+  try {
+    const transactionId = `DEP-${Date.now()}-${req.agent.agentId}`;
+    const agent = await queryGet('SELECT name, email, wallet_id FROM agents WHERE id = ?', [req.agent.agentId]);
+    const paymentData = await cinetpayCreatePayment({
+      amount: numAmount,
+      transactionId,
+      description: `Recharge flotte Cabine 2.0 — ${agent?.name}`,
+      customerName: agent?.name || req.agent.name,
+      customerEmail: req.agent.email,
+      customerPhone: phone || '',
+      returnUrl: `${APP_DOMAIN}/?deposit_success=1&amount=${numAmount}`,
+    });
+    pendingDeposits.set(transactionId, {
+      agentId: req.agent.agentId,
+      walletId: agent?.wallet_id || req.agent.walletId,
+      amount: numAmount,
+      createdAt: Date.now(),
+    });
+    // Nettoyer après 2h
+    setTimeout(() => pendingDeposits.delete(transactionId), 7200000);
+    log('INFO', `Dépôt CinetPay initié: ${numAmount} FCFA`, { by: req.agent.email, transactionId });
+    res.json({
+      transactionId,
+      paymentUrl: paymentData.payment_url,
+      amount: numAmount,
+      message: 'Lien de paiement créé. Payez via votre téléphone.',
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Vérifier manuellement le statut d'un dépôt CinetPay
+app.get('/api/wallet/topup/:transactionId/status', authMiddleware, async (req, res) => {
+  if (req.agent.role !== 'admin') return res.status(403).json({ error: 'Admin requis.' });
+  try {
+    const checkRes = await fetch(`${CINETPAY_BASE}/payment/check`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        apikey: CINETPAY_API_KEY,
+        site_id: CINETPAY_SITE_ID,
+        transaction_id: req.params.transactionId,
+      }),
+    });
+    const data = await checkRes.json();
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Webhook CinetPay — confirmation de paiement ──
+app.post('/api/webhooks/cinetpay', async (req, res) => {
+  res.status(200).send('OK'); // Répondre 200 immédiatement à CinetPay
+  try {
+    const { cpm_trans_id, cpm_amount, cpm_result, status, payment_method } = req.body;
+    log('INFO', '[CINETPAY WEBHOOK]', { transactionId: cpm_trans_id, status, result: cpm_result });
+    if (cpm_result !== '00' && status !== 'ACCEPTED') return;
+    const deposit = pendingDeposits.get(cpm_trans_id);
+    if (!deposit) {
+      log('WARN', '[CINETPAY] Dépôt introuvable en mémoire', { transactionId: cpm_trans_id });
+      return;
+    }
+    const amount = parseInt(cpm_amount, 10) || deposit.amount;
+    await queryRunUpdate('UPDATE wallets SET balance = balance + ? WHERE id = ?', [amount, deposit.walletId]);
+    await queryRunInsert(
+      'INSERT INTO balance_ledger (wallet_id, amount, type, description, done_by) VALUES (?, ?, ?, ?, ?)',
+      [deposit.walletId, amount, 'DEPOSIT_CINETPAY', `Dépôt ${payment_method || 'Mobile Money'} — ${cpm_trans_id}`, deposit.agentId]
+    );
+    const wallet = await queryGet('SELECT balance FROM wallets WHERE id = ?', [deposit.walletId]);
+    notifyWallet(deposit.walletId, 'balance_update', {
+      balance: wallet.balance,
+      type: 'DEPOSIT',
+      amount,
+      method: payment_method,
+    });
+    pendingDeposits.delete(cpm_trans_id);
+    log('INFO', `✅ Dépôt confirmé CinetPay: +${amount} FCFA`, { walletId: deposit.walletId, method: payment_method });
+  } catch (err) {
+    log('ERROR', '[CINETPAY WEBHOOK] Erreur', { error: err.message });
+  }
 });
 
 // ── Status public (uptime, santé système) ──

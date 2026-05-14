@@ -865,6 +865,13 @@ function App() {
   const [rechargeMsg, setRechargeMsg]         = useState('');
   const [genInvoiceMsg, setGenInvoiceMsg]     = useState('');
   const [webhookDebug, setWebhookDebug]       = useState(null);
+
+  // Dépôt CinetPay
+  const [depositAmount, setDepositAmount]     = useState('');
+  const [depositPhone, setDepositPhone]       = useState('');
+  const [depositLoading, setDepositLoading]   = useState(false);
+  const [depositUrl, setDepositUrl]           = useState('');
+  const [depositMsg, setDepositMsg]           = useState('');
   const [showWaveQR, setShowWaveQR]           = useState(false);
 
   // Change password (for all users)
@@ -1082,6 +1089,31 @@ function App() {
       await apiFetch(`/agents/${id}/toggle`, { method: 'PUT' });
       fetchAgents();
     } catch { /* silent */ }
+  };
+
+  const initDeposit = async () => {
+    const num = parseInt(depositAmount, 10);
+    if (!num || num < 500) { setDepositMsg('❌ Minimum 500 FCFA.'); return; }
+    setDepositLoading(true); setDepositMsg(''); setDepositUrl('');
+    try {
+      const res = await apiFetch('/wallet/topup/init', {
+        method: 'POST',
+        body: JSON.stringify({ amount: num, phone: depositPhone }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (data.setup) {
+          setDepositMsg(`⚙️ ${data.error} — ${data.setup}`);
+        } else {
+          setDepositMsg(`❌ ${data.error}`);
+        }
+        return;
+      }
+      setDepositUrl(data.paymentUrl);
+      setDepositMsg(`✅ Lien créé pour ${new Intl.NumberFormat('fr-FR').format(num)} FCFA`);
+      window.open(data.paymentUrl, '_blank');
+    } catch (err) { setDepositMsg(`❌ ${err.message}`); }
+    finally { setDepositLoading(false); }
   };
 
   const fetchAdminOverview = async () => {
@@ -2658,79 +2690,85 @@ function App() {
           </button>
         </div>
 
-        {/* Mon compte — self-recharge */}
+        {/* Mon compte — Dépôt Mobile Money via CinetPay */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '24px' }}>
-          <div style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)', borderRadius: '16px', padding: '20px', color: 'white' }}>
-            <div style={{ fontSize: '12px', opacity: 0.85, marginBottom: '4px', fontWeight: 500 }}>MON SOLDE FLOTTE</div>
-            <div style={{ fontSize: '28px', fontWeight: 800, marginBottom: '4px' }}>
-              {new Intl.NumberFormat('fr-FR').format(balance)} <span style={{ fontSize: '14px', fontWeight: 500 }}>FCFA</span>
+          {/* Carte solde */}
+          <div style={{ background: 'linear-gradient(135deg, #4338ca 0%, #6366f1 60%, #818cf8 100%)', borderRadius: '20px', padding: '24px 22px', color: 'white', boxShadow: '0 12px 40px rgba(99,102,241,.35)' }}>
+            <div style={{ fontSize: '10px', opacity: 0.65, marginBottom: '6px', fontWeight: 700, letterSpacing: '2px', textTransform: 'uppercase' }}>SOLDE FLOTTE</div>
+            <div style={{ fontSize: '34px', fontWeight: 900, letterSpacing: '-1.5px', marginBottom: '4px' }}>
+              {new Intl.NumberFormat('fr-FR').format(balance)} <span style={{ fontSize: '16px', fontWeight: 500, opacity: 0.8 }}>FCFA</span>
             </div>
-            <div style={{ fontSize: '12px', opacity: 0.75 }}>{agentName} • Admin</div>
-          </div>
-          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '16px', padding: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Gestion du solde flotte</div>
-            <button
-              className="btn-primary"
-              style={{ background: '#10b981', fontSize: '13px' }}
-              onClick={async () => {
-                addToast('info', 'Synchronisation...', 'Lecture du solde GeniusPay en cours.');
-                try {
+            <div style={{ fontSize: '12px', opacity: 0.7, marginBottom: '16px' }}>{agentName} • Admin</div>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <button style={{ background: 'rgba(255,255,255,0.18)', border: 'none', color: 'white', borderRadius: '10px', padding: '7px 12px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', flex: 1 }}
+                onClick={() => {
+                  const v = prompt('Solde exact (FCFA) :');
+                  if (!v) return;
+                  const n = parseInt(v, 10);
+                  if (isNaN(n) || n < 0) { addToast('error', 'Invalide', 'Entrez un entier positif.'); return; }
+                  apiFetch('/admin/set-balance/self', { method: 'PUT', body: JSON.stringify({ balance: n, reason: 'Correction initiale' }) })
+                    .then(r => r.json()).then(d => { addToast('success', 'Solde défini', d.message); setBalance(n); fetchAdminOverview(); })
+                    .catch(e => addToast('error', 'Erreur', e.message));
+                }}>Définir solde</button>
+              <button style={{ background: 'rgba(255,255,255,0.18)', border: 'none', color: 'white', borderRadius: '10px', padding: '7px 12px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', flex: 1 }}
+                onClick={async () => {
                   const res = await apiFetch('/admin/sync-balance', { method: 'POST', body: JSON.stringify({ agentId: authAgent?.id }) });
-                  const data = await res.json();
-                  if (!res.ok) { addToast('error', 'Erreur sync', data.error); return; }
-                  addToast('success', 'Solde synchronisé', data.message);
-                  setBalance(data.balance);
-                  fetchAdminOverview();
-                } catch (e) { addToast('error', 'Erreur', e.message); }
-              }}
-            >
-              <RefreshCw size={14} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
-              Sync depuis GeniusPay
+                  const d = await res.json();
+                  if (res.ok) { setBalance(d.balance); addToast('success', 'Sync', d.message); fetchAdminOverview(); }
+                  else addToast('error', 'Erreur sync', d.error);
+                }}>Sync GeniusPay</button>
+            </div>
+          </div>
+
+          {/* Dépôt via Mobile Money (CinetPay) */}
+          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '20px', padding: '20px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
+              <div style={{ width: 36, height: 36, borderRadius: '10px', background: 'rgba(16,185,129,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Banknote size={18} color="#10b981" />
+              </div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-dark)' }}>Déposer via Mobile Money</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Orange · MTN · Wave · Moov (CinetPay)</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+              <div className="form-group" style={{ margin: 0, flex: 1.2 }}>
+                <input type="number" placeholder="Montant FCFA" min="500"
+                  value={depositAmount} onChange={e => setDepositAmount(e.target.value)}
+                  style={{ textAlign: 'right', fontWeight: 700 }} />
+              </div>
+              <div className="form-group" style={{ margin: 0, flex: 1 }}>
+                <input type="tel" placeholder="Numéro (opt.)"
+                  value={depositPhone} onChange={e => setDepositPhone(e.target.value)} />
+              </div>
+            </div>
+            <button className="btn-primary" style={{ width: '100%', background: '#10b981', marginBottom: '8px' }}
+              disabled={depositLoading || !depositAmount} onClick={initDeposit}>
+              {depositLoading
+                ? <><RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }}/> Génération...</>
+                : <><Banknote size={14}/> Payer via Mobile Money</>}
             </button>
-            <button
-              className="btn-primary"
-              style={{ background: '#6366f1', fontSize: '13px' }}
-              onClick={() => {
-                setRechargeModal({ agentId: 'self', agentName: agentName + ' (moi)', currentBalance: balance });
-                setRechargeAmount(''); setRechargeNote(''); setRechargeMsg('');
-              }}
-            >
-              <Banknote size={15} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
-              Ajouter au solde
-            </button>
-            <button
-              className="btn-primary"
-              style={{ background: '#6366f1', fontSize: '13px' }}
-              onClick={async () => {
-                const period = new Date().toISOString().slice(0, 7);
-                const res = await apiFetch(`/transactions?limit=1000`);
-                const txs = await res.json();
-                downloadPDFReport(agentName, authAgent?.email || '', period, txs, { commissionRate: commissions?.transfer || 2 });
-              }}
-            >
-              <Download size={14} style={{ marginRight: '6px', verticalAlign: 'middle' }}/>
-              Rapport PDF du mois
-            </button>
-            <button
-              className="btn-secondary"
-              style={{ fontSize: '13px', color: 'var(--accent-red)' }}
-              onClick={() => {
-                const v = prompt('Définir le solde exact (FCFA) — remplace le solde actuel :');
-                if (!v) return;
-                const n = parseInt(v, 10);
-                if (isNaN(n) || n < 0) { addToast('error', 'Valeur invalide', 'Entrez un nombre entier positif.'); return; }
-                apiFetch(`/admin/set-balance/self`, { method: 'PUT', body: JSON.stringify({ balance: n, reason: 'Correction solde initial' }) })
-                  .then(r => r.json())
-                  .then(d => { addToast('success', 'Solde défini', d.message); setBalance(n); fetchAdminOverview(); })
-                  .catch(e => addToast('error', 'Erreur', e.message));
-              }}
-            >
-              Définir un solde exact
-            </button>
-            <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: 0 }}>
-              "Sync GeniusPay" lit le solde réel de ton wallet et le synchronise.<br/>
-              "Définir exact" remplace le solde — utilise cette option pour passer de 2 450 000 F test à 0.
-            </p>
+            {depositMsg && (
+              <p style={{ fontSize: '12px', marginBottom: '6px', color: depositMsg.startsWith('✅') ? 'var(--accent-green)' : depositMsg.startsWith('⚙️') ? '#b45309' : 'var(--accent-red)' }}>
+                {depositMsg}
+              </p>
+            )}
+            {depositUrl && (
+              <button className="btn-secondary" style={{ width: '100%', fontSize: '12px', color: 'var(--accent-primary)', marginBottom: '8px' }}
+                onClick={() => window.open(depositUrl, '_blank')}>
+                Rouvrir le lien de paiement
+              </button>
+            )}
+            <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '10px', marginTop: '4px' }}>
+              <button className="btn-primary" style={{ width: '100%', background: '#6366f1', fontSize: '12px' }}
+                onClick={async () => {
+                  const res = await apiFetch('/transactions?limit=1000');
+                  const txs = await res.json();
+                  downloadPDFReport(agentName, authAgent?.email || '', new Date().toISOString().slice(0, 7), txs, { commissionRate: commissions?.transfer || 2 });
+                }}>
+                <Download size={13} style={{ marginRight: '5px', verticalAlign: 'middle' }}/> Rapport PDF du mois
+              </button>
+            </div>
           </div>
         </div>
 
